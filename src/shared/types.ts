@@ -1,0 +1,189 @@
+// Shared types between main process, preload, and renderer.
+
+export type ModelId =
+  | "claude-opus-4.8"
+  | "gpt-5"
+  | "gemini-3"
+  | "deepseek-v3"
+  | "grok-4"
+  | "composer-2.5";
+
+export type Provider = "anthropic" | "openai" | "google" | "deepseek" | "xai";
+
+export type OptLevel = 1 | 2 | 3 | 4;
+
+export interface ModelInfo {
+  id: ModelId;
+  label: string;
+  provider: Provider;
+  rewriteModel: string; // model id used by the rewrite LLM in managed/byok mode
+}
+
+export const MODELS: ModelInfo[] = [
+  { id: "claude-opus-4.8", label: "Claude Opus 4.8", provider: "anthropic", rewriteModel: "claude-opus-4-8" },
+  { id: "gpt-5", label: "GPT-5", provider: "openai", rewriteModel: "gpt-5" },
+  { id: "gemini-3", label: "Gemini 3 Pro", provider: "google", rewriteModel: "gemini-3-pro" },
+  { id: "deepseek-v3", label: "DeepSeek V3", provider: "deepseek", rewriteModel: "deepseek-chat" },
+  { id: "grok-4", label: "Grok 4", provider: "xai", rewriteModel: "grok-4" },
+  { id: "composer-2.5", label: "Composer 2.5", provider: "openai", rewriteModel: "composer-2.5" },
+];
+
+/** Single rewrite LLM used for all optimizations regardless of target model. */
+export const REWRITE_CONFIG = {
+  provider: "openai" as const,
+  modelId: "gpt-4.1-mini",
+  label: "GPT-4.1 mini",
+};
+
+/** OpenAI temperature per optimization level (L1 = cool, L4 = max). */
+export const LEVEL_TEMPERATURE: Record<OptLevel, number> = {
+  1: 0.2,
+  2: 0.5,
+  3: 0.75,
+  4: 1.0,
+};
+
+export const LEVEL_LABELS: Record<OptLevel, string> = {
+  1: "Cool",
+  2: "Warm",
+  3: "Hot",
+  4: "Max",
+};
+
+export type CaptureMode = "field" | "empty";
+
+export interface SubScores {
+  clarity: number;
+  context: number;
+  structure: number;
+  format: number;
+  examples: number;
+  persona: number;
+  verifiability: number;
+}
+
+export interface DiffSegment {
+  type: "add" | "remove" | "context";
+  text: string;
+  tag?: string; // e.g. "+ Role/persona"
+}
+
+export interface OptimizeResult {
+  optimizedPrompt: string;
+  score: number; // 0-100, post-optimization
+  baselineScore: number; // pre-optimization
+  subscores: SubScores;
+  baselineSubscores: SubScores;
+  diff: DiffSegment[];
+  personaSuggestion: string;
+  notes: string[];
+  model: ModelId;
+  level: OptLevel;
+  source: "llm" | "local";
+  packVersion: string;
+}
+
+export interface OptimizeRequest {
+  prompt: string;
+  model: ModelId;
+  level: OptLevel;
+  persona?: string;
+  context?: string;
+}
+
+export interface LibraryItem {
+  id: string;
+  title: string;
+  originalText: string;
+  optimizedText: string;
+  model: ModelId;
+  level: OptLevel;
+  score: number;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface HistoryItem {
+  id: string;
+  originalText: string;
+  optimizedText: string;
+  model: ModelId;
+  level: OptLevel;
+  score: number;
+  source: "llm" | "local";
+  createdAt: number;
+}
+
+export interface AppSettings {
+  hotkey: string; // e.g. "CommandOrControl+Shift+O"
+  defaultModel: ModelId;
+  defaultLevel: OptLevel;
+  defaultPersona: string;
+  contextMemory: string;
+  managedEnabled: boolean;
+  providerKeys: Partial<Record<Provider, boolean>>; // presence flags only (keys live in OS keychain)
+  telemetry: boolean;
+  theme: "dark" | "light";
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  hotkey: "CommandOrControl+Shift+O",
+  defaultModel: "claude-opus-4.8",
+  defaultLevel: 2,
+  defaultPersona: "",
+  contextMemory: "",
+  managedEnabled: false,
+  providerKeys: {},
+  telemetry: false,
+  theme: "dark",
+};
+
+export const RUBRIC_WEIGHTS: SubScores = {
+  clarity: 25,
+  context: 20,
+  structure: 15,
+  format: 15,
+  examples: 10,
+  persona: 10,
+  verifiability: 5,
+};
+
+export const RUBRIC_KEYS: (keyof SubScores)[] = [
+  "clarity",
+  "context",
+  "structure",
+  "format",
+  "examples",
+  "persona",
+  "verifiability",
+];
+
+// IPC channels
+export const IPC = {
+  OPTIMIZE: "promptforge:optimize",
+  ANALYZE: "promptforge:analyze",
+  CAPTURE_TRIGGER: "promptforge:capture:trigger",
+  CAPTURE_INJECT: "promptforge:capture:inject",
+  CAPTURE_COPY: "promptforge:capture:copy",
+  SETTINGS_GET: "promptforge:settings:get",
+  SETTINGS_SET: "promptforge:settings:set",
+  KEYS_SET: "promptforge:keys:set",
+  KEYS_HAS: "promptforge:keys:has",
+  KEYS_DELETE: "promptforge:keys:delete",
+  KEYS_PROVIDERS: "promptforge:keys:providers",
+  LIBRARY_LIST: "promptforge:library:list",
+  LIBRARY_SAVE: "promptforge:library:save",
+  LIBRARY_DELETE: "promptforge:library:delete",
+  HISTORY_LIST: "promptforge:history:list",
+  HISTORY_CLEAR: "promptforge:history:clear",
+  OVERLAY_SHOW: "promptforge:overlay:show",
+  OVERLAY_CAPTURE_PENDING: "promptforge:overlay:capture-pending",
+  OVERLAY_HIDE: "promptforge:overlay:hide",
+  OVERLAY_CLEAR: "promptforge:overlay:clear",
+  STUDIO_SHOW: "promptforge:studio:show",
+  STUDIO_SETTINGS: "promptforge:studio:settings",
+  STUDIO_ROUTE: "promptforge:studio:route",
+  TRAY_QUIT: "promptforge:tray:quit",
+  OPTIMIZE_STREAM: "promptforge:optimize:stream",
+} as const;

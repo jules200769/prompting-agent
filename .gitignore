@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-renderer
+release
+*.log
+.env
+.env.local
+promptforge.db
+promptforge.db-journal
