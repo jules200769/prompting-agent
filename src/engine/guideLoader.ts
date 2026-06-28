@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ModelId, OptLevel } from "../shared/types";
-import { LEVEL_TEMPERATURE } from "../shared/types";
+import { LEVEL_LABELS } from "../shared/types";
 
 const GUIDE_FILES: Record<ModelId, string> = {
   "claude-opus-4.8": "opus4.8.md",
@@ -131,12 +131,12 @@ function levelKeywords(level: OptLevel): string[] {
 }
 
 export function getLevelRewriteInstruction(level: OptLevel): string {
-  const temp = LEVEL_TEMPERATURE[level];
+  const label = LEVEL_LABELS[level];
   const lines: Record<OptLevel, string> = {
-    1: `Level 1 (Cool, temperature ${temp}): Minimal rewrite. Fix typos and ambiguity only. Keep the user's sentences and order. Apply only the lightest guide formatting if clearly beneficial.`,
-    2: `Level 2 (Warm, temperature ${temp}): Light model-native structure (e.g. XML tags for Claude, markdown headers for GPT). Preserve all user content; reorganize slightly for clarity.`,
-    3: `Level 3 (Hot, temperature ${temp}): Full guide-compliant structure — context, task, constraints, and output format sections as the guide prescribes. Do not invent facts; use brief placeholders only where the user left gaps.`,
-    4: `Level 4 (Max, temperature ${temp}): Apply the complete guide methodology including examples, verification/success criteria, and advanced patterns from the guide where relevant. Still preserve user intent.`,
+    1: `Level 1 (Cool — ${label} guide structure): Minimal rewrite. Fix typos and ambiguity only. Keep the user's sentences and order. Apply only the lightest guide formatting if clearly beneficial.`,
+    2: `Level 2 (Warm — ${label} guide structure): Light model-native structure (e.g. XML tags for Claude, markdown headers for GPT). Preserve all user content; reorganize slightly for clarity.`,
+    3: `Level 3 (Hot — ${label} guide structure): Full guide-compliant structure — context, task, constraints, and output format sections as the guide prescribes. Do not invent facts; use brief placeholders only where the user left gaps.`,
+    4: `Level 4 (Max — ${label} guide structure): Apply the complete guide methodology including examples, verification/success criteria, and advanced patterns from the guide where relevant. Still preserve user intent.`,
   };
   return lines[level];
 }

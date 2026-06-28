@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppSettings, HistoryItem, LibraryItem, ModelId, OptLevel } from "../../shared/types";
-import { MODELS, REWRITE_CONFIG, LEVEL_LABELS, LEVEL_TEMPERATURE } from "../../shared/types";
+import { MODELS, REWRITE_CONFIG, LEVEL_LABELS } from "../../shared/types";
 import { api } from "../api";
 import { ScoreRing, RubricChips, ScoreLift } from "../components/Score";
 import { DiffView } from "../components/DiffView";
@@ -118,14 +118,14 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
             <button
               key={l}
               onClick={() => setLevel(l)}
-              title={`L${l} ${LEVEL_LABELS[l]} · temp ${LEVEL_TEMPERATURE[l]}`}
+              title={`L${l} ${LEVEL_LABELS[l]} · guide-structuur`}
               className={`px-2 py-0.5 text-xs rounded ${level === l ? "bg-accent text-white" : "text-muted"}`}
             >
               {l} {LEVEL_LABELS[l]}
             </button>
           ))}
         </div>
-        <span className="text-[10px] text-muted">temp {LEVEL_TEMPERATURE[level]}</span>
+        <span className="text-[10px] text-muted">L{level} {LEVEL_LABELS[level]} target</span>
         <div className="ml-auto flex gap-2">
           <button onClick={runAnalyze} className="text-xs px-3 py-1 rounded-md border border-line">Analyze</button>
           <button onClick={runOptimize} disabled={busy} className="text-xs px-3 py-1 rounded-md bg-accent text-white disabled:opacity-40">{busy ? "Optimizing…" : "Optimize"}</button>
@@ -156,6 +156,11 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
         <div className="bg-bg-950 flex flex-col">
           <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-muted border-b border-line flex items-center gap-2">
             Optimized
+            {result && (
+              <span className="normal-case px-1.5 py-0.5 rounded bg-bg-800 text-accent font-medium">
+                Structuur: {LEVEL_LABELS[result.adherenceLevel]}
+              </span>
+            )}
             {result && <ScoreLift before={result.baselineScore} after={result.score} />}
           </div>
           {result ? (
@@ -313,10 +318,10 @@ function Settings() {
                 </select>
                 <p className="text-[10px] text-muted mt-1">The AI model your prompt is optimized for (methodology only, not the rewrite model).</p>
               </Field>
-              <Field label="Default temperature level">
+              <Field label="Default adherence level">
                 <select value={s.defaultLevel} onChange={(e) => update({ defaultLevel: Number(e.target.value) as OptLevel })} className="w-full bg-bg-800 border border-line rounded-md text-sm px-2 py-1.5">
                   {([1, 2, 3, 4] as OptLevel[]).map((l) => (
-                    <option key={l} value={l}>L{l} {LEVEL_LABELS[l]} (temp {LEVEL_TEMPERATURE[l]})</option>
+                    <option key={l} value={l}>L{l} {LEVEL_LABELS[l]}</option>
                   ))}
                 </select>
               </Field>

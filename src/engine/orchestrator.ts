@@ -2,10 +2,10 @@
 // guides, streams plain refined prompt, scores locally via rubric.
 
 import type { ModelId, OptLevel, OptimizeRequest, OptimizeResult } from "../shared/types";
-import { LEVEL_LABELS, LEVEL_TEMPERATURE } from "../shared/types";
+import { LEVEL_LABELS } from "../shared/types";
 import { rewriteProviderForTarget } from "../shared/rewrite";
 import { getPack } from "./packs";
-import { analyze, emptySubscores } from "./rubric";
+import { analyze, adherenceLevel, emptySubscores } from "./rubric";
 import { buildDiff } from "./diff";
 import { optimizeLocal } from "./localOptimizer";
 import { stripResponseArtifacts } from "./cleanRewrite";
@@ -22,7 +22,6 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
   const baseline = analyze(request.prompt);
   const pack = getPack(request.model);
   const levelLabel = LEVEL_LABELS[request.level];
-  const temperature = LEVEL_TEMPERATURE[request.level];
 
   const apiKey = await keyStore.get(rewriteProviderForTarget(request.model));
 
@@ -65,12 +64,15 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
 
   const optimizedPrompt = stripResponseArtifacts(raw);
   const post = analyze(optimizedPrompt);
+  const measuredAdherence = adherenceLevel(post.subscores);
+  const adherenceLabel = LEVEL_LABELS[measuredAdherence];
   const diff = buildDiff(request.prompt, optimizedPrompt);
 
   ctx.onText(optimizedPrompt);
 
   const notes = [
-    `Applied ${pack.label} prompting guide (L${request.level} ${levelLabel}, temp ${temperature}).`,
+    `Applied ${pack.label} prompting guide (L${request.level} ${levelLabel} target).`,
+    `Guide-structuur: ${adherenceLabel} (L${measuredAdherence}).`,
     "Local rubric score — refined prompt follows model-specific guide.",
   ];
 
@@ -85,6 +87,7 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
     notes,
     model: request.model,
     level: request.level,
+    adherenceLevel: measuredAdherence,
     source: "llm",
     packVersion: pack.version,
   };

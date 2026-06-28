@@ -102,21 +102,21 @@ function createStudio(): BrowserWindow {
   return w;
 }
 
-// Pin the overlay to the top-center of the active display (notch position).
-function positionOverlayTopCenter(): void {
+// Center the overlay on the active display work area.
+function positionOverlayCenter(): void {
   if (!overlay) return;
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
-  const { x: ax, y: ay, width: aw } = display.workArea;
-  const [w] = overlay.getSize();
+  const { x: ax, y: ay, width: aw, height: ah } = display.workArea;
+  const [w, h] = overlay.getSize();
   const x = Math.round(ax + (aw - w) / 2);
-  const y = Math.round(ay + 8);
+  const y = Math.round(ay + (ah - h) / 2);
   overlay.setPosition(x, y);
 }
 
 function showOverlay(): void {
   if (!overlay) overlay = createOverlay();
-  positionOverlayTopCenter();
+  positionOverlayCenter();
   overlay.showInactive();
   // Do not call overlay.focus() — keeps target app's focus hwnd stable for Apply.
 }

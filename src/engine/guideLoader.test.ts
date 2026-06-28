@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { clearGuideCache, getGuideExcerpt, loadGuideFull } from "./guideLoader";
-import { LEVEL_TEMPERATURE } from "../shared/types";
+import { clearGuideCache, getGuideExcerpt, getLevelRewriteInstruction, loadGuideFull } from "./guideLoader";
+import { REWRITE_CONFIG } from "../shared/types";
 
 describe("guideLoader", () => {
   beforeEach(() => {
@@ -30,11 +30,17 @@ describe("guideLoader", () => {
     expect(l4.length).toBeLessThanOrEqual(12000);
   });
 
-  it("level temperature mapping matches plan", () => {
-    expect(LEVEL_TEMPERATURE[1]).toBe(0.2);
-    expect(LEVEL_TEMPERATURE[2]).toBe(0.5);
-    expect(LEVEL_TEMPERATURE[3]).toBe(0.75);
-    expect(LEVEL_TEMPERATURE[4]).toBe(1.0);
+  it("level rewrite instructions describe guide structure, not temperature", () => {
+    for (const level of [1, 2, 3, 4] as const) {
+      const instruction = getLevelRewriteInstruction(level);
+      expect(instruction.toLowerCase()).not.toContain("temperature");
+      expect(instruction).toContain("guide structure");
+    }
+    expect(getLevelRewriteInstruction(4).length).toBeGreaterThan(getLevelRewriteInstruction(1).length);
+  });
+
+  it("rewrite API uses fixed temperature", () => {
+    expect(REWRITE_CONFIG.temperature).toBe(0.3);
   });
 });
 
@@ -64,6 +70,7 @@ describe("optimizeLocal", () => {
     expect(res.optimizedPrompt).toContain("<task>");
     expect(res.optimizedPrompt).toContain("<constraints>");
     expect(res.source).toBe("local");
+    expect(res.adherenceLevel).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps minimal output at level 1", async () => {

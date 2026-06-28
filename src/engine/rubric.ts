@@ -3,7 +3,7 @@
 // engine AND emitted alongside LLM results (the LLM also scores, but we compute
 // a deterministic ground-truth score so the UI never shows a fabricated number).
 
-import type { SubScores } from "../shared/types";
+import type { OptLevel, SubScores } from "../shared/types";
 import { RUBRIC_KEYS } from "../shared/types";
 
 function countWords(s: string): number {
@@ -146,4 +146,30 @@ export function analyze(text: string): Analysis {
 
 export function emptySubscores(): SubScores {
   return { clarity: 0, context: 0, structure: 0, format: 0, examples: 0, persona: 0, verifiability: 0 };
+}
+
+/** Max points for guide-structure subscores (structure + format + examples + persona + verifiability). */
+const STRUCTURE_ADHERENCE_MAX = 55;
+
+/** Thresholds as fraction of STRUCTURE_ADHERENCE_MAX. */
+const ADHERENCE_THRESHOLDS: { min: number; level: OptLevel }[] = [
+  { min: 0.8, level: 4 },
+  { min: 0.5, level: 3 },
+  { min: 0.25, level: 2 },
+  { min: 0, level: 1 },
+];
+
+/** Classify prompt guide-structure adherence as Cool/Warm/Hot/Max. */
+export function adherenceLevel(subscores: SubScores): OptLevel {
+  const structureScore =
+    subscores.structure +
+    subscores.format +
+    subscores.examples +
+    subscores.persona +
+    subscores.verifiability;
+  const ratio = structureScore / STRUCTURE_ADHERENCE_MAX;
+  for (const { min, level } of ADHERENCE_THRESHOLDS) {
+    if (ratio >= min) return level;
+  }
+  return 1;
 }

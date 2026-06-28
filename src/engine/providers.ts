@@ -3,7 +3,7 @@
 
 import OpenAI from "openai";
 import type { ModelId, OptLevel } from "../shared/types";
-import { LEVEL_TEMPERATURE, REWRITE_CONFIG } from "../shared/types";
+import { REWRITE_CONFIG } from "../shared/types";
 import { getPack } from "./packs";
 import { getGuideExcerpt, getLevelRewriteInstruction } from "./guideLoader";
 
@@ -63,7 +63,7 @@ export async function optimizeStream(params: OptimizeParams, cb: StreamCallbacks
   const stream = await client.chat.completions.create({
     model: REWRITE_CONFIG.modelId,
     stream: true,
-    temperature: LEVEL_TEMPERATURE[params.level],
+    temperature: REWRITE_CONFIG.temperature,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },

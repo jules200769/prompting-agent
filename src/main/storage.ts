@@ -17,6 +17,7 @@ import type {
 } from "../shared/types";
 import { DEFAULT_SETTINGS } from "../shared/types";
 import { buildDiff } from "../engine/diff";
+import { adherenceLevel } from "../engine/rubric";
 
 const OPT_CACHE_MAX = 100;
 
@@ -201,6 +202,7 @@ export function hydrateCacheResult(cached: CachedOptimizeEntry, originalPrompt: 
   return {
     ...cached,
     diff: buildDiff(originalPrompt, cached.optimizedPrompt),
+    adherenceLevel: adherenceLevel(cached.subscores),
   };
 }
 
@@ -210,7 +212,7 @@ export function getCache(hash: string, originalPrompt?: string): OptimizeResult 
   if (!cached) return null;
   touchCacheKey(d, hash);
   if (originalPrompt == null) {
-    return { ...cached, diff: [] };
+    return { ...cached, diff: [], adherenceLevel: adherenceLevel(cached.subscores) };
   }
   return hydrateCacheResult(cached, originalPrompt);
 }

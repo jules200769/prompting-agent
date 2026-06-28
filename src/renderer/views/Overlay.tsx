@@ -1,11 +1,241 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { api } from "../api";
-import type { CaptureMode, ModelId, OptLevel, OptimizeResult } from "../../shared/types";
-import { MODELS, REWRITE_CONFIG, LEVEL_LABELS, LEVEL_TEMPERATURE } from "../../shared/types";
-import { ScoreLift } from "../components/Score";
-import { DiffView } from "../components/DiffView";
+import type { CaptureMode, ModelId, OptLevel } from "../../shared/types";
+import { MODELS, LEVEL_LABELS } from "../../shared/types";
 
 type Phase = "idle" | "capturing" | "optimizing" | "done" | "error";
+
+function MoreIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="5" r="2" fill="currentColor" />
+      <circle cx="12" cy="12" r="2" fill="currentColor" />
+      <circle cx="12" cy="19" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ChevronDown() {
+  return (
+    <svg width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden className="opacity-90">
+      <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const LEVEL_COLORS: Record<OptLevel, string> = {
+  1: "#5AC8FA",
+  2: "#FFD60A",
+  3: "#FF9F0A",
+  4: "#FF453A",
+};
+
+const SLIDER_TRACK_W = 132;
+const SLIDER_EDGE = 13;
+
+function LevelSlider({
+  level,
+  onChange,
+  disabled,
+}: {
+  level: OptLevel;
+  onChange: (l: OptLevel) => void;
+  disabled?: boolean;
+}) {
+  const levels = [1, 2, 3, 4] as OptLevel[];
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dragPct, setDragPct] = useState((level - 1) / 3);
+
+  const thumbPct = dragging ? dragPct : (level - 1) / 3;
+  const travel = SLIDER_TRACK_W - SLIDER_EDGE * 2;
+  const center = SLIDER_EDGE + travel * thumbPct;
+
+  const updateFromX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const span = rect.width - SLIDER_EDGE * 2;
+    let pct = span > 0 ? (clientX - rect.left - SLIDER_EDGE) / span : 0;
+    pct = Math.min(1, Math.max(0, pct));
+    setDragPct(pct);
+    const next = (Math.round(pct * 3) + 1) as OptLevel;
+    if (next !== level) onChange(next);
+  };
+
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if (disabled) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    updateFromX(e.clientX);
+  };
+  const onPointerMove = (e: ReactPointerEvent) => {
+    if (dragging) updateFromX(e.clientX);
+  };
+  const endDrag = (e: ReactPointerEvent) => {
+    if (!dragging) return;
+    setDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    if (disabled) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+      e.preventDefault();
+      onChange(Math.max(1, level - 1) as OptLevel);
+    } else if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+      e.preventDefault();
+      onChange(Math.min(4, level + 1) as OptLevel);
+    }
+  };
+
+  return (
+    <div
+      className="level-slider flex items-center gap-2.5 shrink-0"
+      role="group"
+      aria-label={`Guide depth L${level} ${LEVEL_LABELS[level]}`}
+    >
+      <div
+        ref={trackRef}
+        className={`level-slider__track relative h-[26px] rounded-full touch-none ${
+          disabled ? "opacity-40" : "cursor-pointer"
+        }`}
+        style={{ width: SLIDER_TRACK_W }}
+        role="slider"
+        tabIndex={disabled ? -1 : 0}
+        aria-valuemin={1}
+        aria-valuemax={4}
+        aria-valuenow={level}
+        aria-valuetext={`L${level} ${LEVEL_LABELS[level]}`}
+        aria-disabled={disabled}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onKeyDown={onKeyDown}
+      >
+        <div className="level-slider__lane absolute left-0 right-0 top-1/2 -translate-y-1/2 h-[3px] rounded-full pointer-events-none" />
+        <div className="absolute inset-0 flex items-center justify-between px-[11px] pointer-events-none">
+          {levels.map((l) => (
+            <span key={l} className="w-[3px] h-[3px] rounded-full bg-white/25" />
+          ))}
+        </div>
+        <div
+          className={`level-slider__fill absolute left-0 top-1/2 -translate-y-1/2 h-[3px] rounded-full pointer-events-none ${
+            dragging ? "" : "level-slider__fill--rest"
+          }`}
+          style={{ width: center }}
+        />
+        <div
+          className={`level-slider__thumb absolute top-1/2 w-5 h-5 rounded-full pointer-events-none ${
+            dragging ? "" : "level-slider__thumb--rest"
+          }`}
+          style={{ left: center, transform: `translate(-50%, -50%) scale(${dragging ? 1.14 : 1})` }}
+        />
+      </div>
+      <span
+        key={level}
+        className="level-slider__label text-[13px] font-semibold leading-none select-none text-left"
+        style={{ color: LEVEL_COLORS[level], width: 34 }}
+      >
+        {LEVEL_LABELS[level]}
+      </span>
+    </div>
+  );
+}
+
+function modelDisplayLabel(id: ModelId): string {
+  const m = MODELS.find((x) => x.id === id);
+  if (!m) return id;
+  return m.label.replace("Claude Opus 4.8", "Opus4.8").replace("Claude ", "").replace(" Pro", "");
+}
+
+function ModelPicker({
+  model,
+  onChange,
+  disabled,
+}: {
+  model: ModelId;
+  onChange: (id: ModelId) => void;
+  disabled?: boolean;
+}) {
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const [textWidth, setTextWidth] = useState(0);
+  const displayLabel = modelDisplayLabel(model);
+  const chevronGap = 7;
+  const chevronWidth = 10;
+  const selectWidth = textWidth + chevronGap + chevronWidth;
+
+  useLayoutEffect(() => {
+    if (!measureRef.current) return;
+    setTextWidth(measureRef.current.offsetWidth);
+  }, [displayLabel]);
+
+  return (
+    <div className="relative inline-block text-[15px] font-medium text-white">
+      <span
+        ref={measureRef}
+        aria-hidden
+        className="invisible absolute whitespace-nowrap font-medium text-[15px] pointer-events-none"
+      >
+        {displayLabel}
+      </span>
+      <select
+        value={model}
+        onChange={(e) => onChange(e.target.value as ModelId)}
+        disabled={disabled}
+        aria-label="Target model"
+        style={{ width: selectWidth || undefined }}
+        className="appearance-none bg-transparent border-0 pl-0 pr-0 py-0 text-[15px] font-medium text-white focus:outline-none cursor-pointer disabled:opacity-50"
+      >
+        {MODELS.map((m) => (
+          <option key={m.id} value={m.id} className="bg-bg-900 text-white">
+            {modelDisplayLabel(m.id)}
+          </option>
+        ))}
+      </select>
+      <span
+        className="pointer-events-none absolute top-1/2 -translate-y-1/2"
+        style={{ left: textWidth + chevronGap }}
+      >
+        <ChevronDown />
+      </span>
+    </div>
+  );
+}
+
+function GlassPill({
+  children,
+  onClick,
+  disabled,
+  className = "",
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`apple-glass-pill px-5 py-1.5 rounded-full text-[15px] font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
 
 export function Overlay() {
   const [mode, setMode] = useState<CaptureMode>("field");
@@ -14,9 +244,11 @@ export function Overlay() {
   const [prompt, setPrompt] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [streamed, setStreamed] = useState("");
-  const [result, setResult] = useState<OptimizeResult | null>(null);
-  const [showDiff, setShowDiff] = useState(false);
+  const [outputText, setOutputText] = useState("");
+  const [hasGenerated, setHasGenerated] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const captureRef = useRef<{ text: string; mode: CaptureMode; snapshot: { text: string; hasText: boolean } } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const keyStateRef = useRef({ mode, phase, captureFailed: false });
   const actionsRef = useRef<{ runOptimize: () => void; onApply: () => void }>({
     runOptimize: () => {},
@@ -46,8 +278,9 @@ export function Overlay() {
       setPrompt(detail.text);
       setPhase("idle");
       setStreamed("");
-      setResult(null);
-      setShowDiff(false);
+      setOutputText("");
+      setHasGenerated(false);
+      setMenuOpen(false);
     };
 
     const onCapturePending = () => {
@@ -56,8 +289,9 @@ export function Overlay() {
       setPrompt("");
       setPhase("capturing");
       setStreamed("");
-      setResult(null);
-      setShowDiff(false);
+      setOutputText("");
+      setHasGenerated(false);
+      setMenuOpen(false);
     };
 
     const offPending = api.onOverlayCapturePending(onCapturePending);
@@ -68,31 +302,47 @@ export function Overlay() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
+
   async function runOptimize() {
     if (!prompt.trim()) return;
     setPhase("optimizing");
     setStreamed("");
-    setResult(null);
+    setOutputText("");
     try {
       const res = await api.optimize({ prompt, model, level }, (chunk) => {
         setStreamed((s) => s + chunk);
       });
-      setResult(res);
       setStreamed(res.optimizedPrompt);
+      setOutputText(res.optimizedPrompt);
+      setHasGenerated(true);
       setPhase("done");
     } catch (e: any) {
       setPhase("error");
-      setStreamed(`Error: ${e?.message ?? e}`);
+      const msg = `Error: ${e?.message ?? e}`;
+      setStreamed(msg);
+      setOutputText(msg);
+      setHasGenerated(true);
     }
   }
 
   async function onApply() {
-    if (!result) return;
-    await api.captureInject(result.optimizedPrompt, captureRef.current?.snapshot ?? { text: "", hasText: false });
+    if (!outputText.trim() || phase !== "done") return;
+    await api.captureInject(outputText, captureRef.current?.snapshot ?? { text: "", hasText: false });
   }
+
   async function onCopy() {
-    if (!result) return;
-    await api.captureCopy(result.optimizedPrompt);
+    if (!outputText.trim()) return;
+    await api.captureCopy(outputText);
   }
 
   actionsRef.current = { runOptimize: () => void runOptimize(), onApply: () => void onApply() };
@@ -120,203 +370,121 @@ export function Overlay() {
   const capturing = phase === "capturing";
   const captureFailed = mode === "empty";
   const canRefine = !captureFailed && !capturing && !!prompt.trim() && !busy;
-  const showResult = phase === "done" || phase === "error";
-  const refinedText = result?.optimizedPrompt ?? streamed;
+  const showOutput = busy || phase === "done" || phase === "error";
+  const outputValue = busy ? streamed : outputText;
+  const canApplyOrCopy = !!outputText.trim() && phase === "done";
+  const modelLabel = MODELS.find((m) => m.id === model)?.label ?? model;
+  const controlsDisabled = captureFailed || capturing || busy;
+
+  const outputPlaceholder = capturing
+    ? "Capturing…"
+    : busy
+      ? "Refining…"
+      : "Output will appear here";
 
   return (
-    <div className="w-full h-full flex items-start justify-center pt-1 px-4">
-      <div className="glass rounded-2xl border border-line shadow-lg shadow-black/20 w-full max-w-3xl overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-line">
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-accent" />
-            <span className="font-semibold text-sm tracking-tight">PromptForge</span>
-          </div>
-          <div className="h-4 w-px bg-line" />
-          <span className="text-[10px] text-muted uppercase tracking-wider">Target</span>
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value as ModelId)}
-            disabled={captureFailed || capturing}
-            className="bg-bg-800 border border-line rounded-md text-xs px-2 py-1 focus:outline-none focus:border-accent disabled:opacity-40"
+    <div className="overlay-font w-full h-full flex items-center justify-center px-12">
+      <div className="relative w-full max-w-[578px]">
+        <div ref={menuRef} className="absolute top-10 -right-10 z-10">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="p-1.5 rounded-full text-white/80 hover:text-white hover:bg-white/20 transition"
+            aria-label="More options"
+            aria-expanded={menuOpen}
           >
-            {MODELS.map((m) => (
-              <option key={m.id} value={m.id}>{m.label}</option>
-            ))}
-          </select>
-          <div className="flex items-center bg-bg-800 border border-line rounded-md p-0.5">
-            {([1, 2, 3, 4] as OptLevel[]).map((l) => (
+            <MoreIcon />
+          </button>
+          {menuOpen && (
+            <div className="apple-glass-menu absolute right-0 mt-1 min-w-[140px] rounded-xl py-1 text-white">
               <button
-                key={l}
-                onClick={() => setLevel(l)}
-                disabled={captureFailed || capturing}
-                title={`L${l} ${LEVEL_LABELS[l]} · temp ${LEVEL_TEMPERATURE[l]}`}
-                className={`px-2 py-0.5 text-xs rounded disabled:opacity-40 ${level === l ? "bg-accent text-white" : "text-muted hover:text-slate-200"}`}
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  api.openSettings();
+                }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
               >
-                {l} {LEVEL_LABELS[l]}
+                Settings
               </button>
-            ))}
-          </div>
-          <span className="text-[10px] text-muted ml-auto">
-            {showResult ? "Enter apply · Esc dismiss" : `Refine · temp ${LEVEL_TEMPERATURE[level]} · Esc`}
-          </span>
+              <button
+                type="button"
+                onClick={() => api.hideOverlay()}
+                className="w-full text-left px-3 py-2 text-sm text-white/70 hover:bg-white/10"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="px-4 py-3 space-y-3 max-h-[60vh] overflow-auto scroll-thin">
-          {captureFailed ? (
-            <div className="text-sm text-warn border border-warn/40 bg-warn/10 rounded-md p-3">
-              Kon geen tekst ophalen. Zorg dat de cursor in een tekstveld staat.
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted mb-1.5">Original</div>
+        <div className="apple-glass relative rounded-[34px] w-full p-4 text-white">
+        {captureFailed ? (
+          <div className="apple-glass-panel rounded-[26px] p-4 text-sm text-warn">
+            Could not capture text. Make sure the cursor is in a text field.
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-4 mb-4 items-start">
+              <div className="flex-1 flex flex-col gap-3">
+                <div className="apple-glass-panel rounded-[26px] h-[88px] overflow-hidden">
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     readOnly={busy || capturing}
                     aria-label="Original prompt"
-                    placeholder={capturing ? "Bezig met capture…" : "(empty)"}
-                    className="w-full text-[13px] leading-relaxed whitespace-pre-wrap break-words bg-bg-900/60 border border-line/60 rounded-lg p-3 max-h-[180px] min-h-[80px] overflow-auto scroll-thin text-slate-300 resize-none focus:outline-none focus:border-accent/50 disabled:opacity-60"
+                    placeholder={capturing ? "Capturing…" : "Prompt input…"}
+                    className="w-full h-full bg-transparent border-0 px-3.5 py-3 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none disabled:opacity-70 scroll-thin"
                   />
-                  {capturing && (
-                    <p className="text-[11px] text-muted mt-1.5 animate-pulse">Tekst ophalen uit actief veld…</p>
-                  )}
                 </div>
-
-                {(showResult || busy) && (
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[10px] uppercase tracking-wider text-muted">
-                        {phase === "error" ? "Error" : busy ? "Refining…" : "Refined"}
-                      </span>
-                      {result && phase === "done" && (
-                        <div className="flex items-center gap-2">
-                          <ScoreLift before={result.baselineScore} after={result.score} />
-                          {result.diff.length > 0 && (
-                            <button
-                              onClick={() => setShowDiff((v) => !v)}
-                              className="text-[10px] text-accent hover:underline"
-                            >
-                              {showDiff ? "hide changes" : "show changes"}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {showDiff && result ? (
-                      <div className="bg-bg-900 border border-line rounded-lg p-2 max-h-[180px] overflow-auto scroll-thin">
-                        <DiffView diff={result.diff} />
-                      </div>
-                    ) : (
-                      <div className={`text-[13px] leading-relaxed whitespace-pre-wrap break-words rounded-lg p-3 min-h-[80px] max-h-[180px] overflow-auto scroll-thin ${
-                        phase === "error"
-                          ? "border border-warn/40 bg-warn/10 text-warn"
-                          : busy
-                            ? "border border-accent/30 bg-accent/5 text-slate-300"
-                            : "border border-accent/20 bg-bg-900 text-slate-100"
-                      }`}>
-                        {refinedText || (busy ? "Bezig met opschonen…" : "")}
-                        {busy && <span className="inline-block w-0.5 h-3.5 ml-0.5 bg-accent animate-pulse align-middle" />}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div className="pl-1 mt-1 flex items-center gap-3">
+                  <GlassPill onClick={() => void runOptimize()} disabled={!canRefine}>
+                    {busy ? "Refining…" : hasGenerated ? "Regenerate" : "Generate"}
+                  </GlassPill>
+                  <LevelSlider level={level} onChange={setLevel} disabled={controlsDisabled} />
+                </div>
               </div>
 
-              {capturing && (
-                <div className="flex items-center gap-2 rounded-md border border-dashed border-line/80 bg-bg-900/50 px-3 py-4">
-                  <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse" />
-                  <p className="text-sm text-muted">Bezig met capture…</p>
-                </div>
-              )}
-
-              {phase === "idle" && !captureFailed && (
-                <div className="flex items-center gap-3 rounded-md border border-dashed border-line/80 bg-bg-900/50 px-3 py-4">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-200 font-medium">Klaar om te verfijnen</p>
-                    <p className="text-[11px] text-muted mt-0.5">
-                      Herschrijft volgens de {MODELS.find((m) => m.id === model)?.label ?? "model"} guide · L{level} {LEVEL_LABELS[level]} (temp {LEVEL_TEMPERATURE[level]}).
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => void runOptimize()}
-                    disabled={!canRefine}
-                    className="shrink-0 px-4 py-2 text-sm rounded-lg bg-accent text-white font-semibold shadow-lg shadow-accent/25 hover:brightness-110 active:scale-[0.98] transition disabled:opacity-40 disabled:shadow-none disabled:active:scale-100"
-                  >
-                    Refine
-                  </button>
-                </div>
-              )}
-
-              {result && phase === "done" && (
-                <p className="text-[10px] text-muted">
-                  {result.source === "llm"
-                    ? `Via ${REWRITE_CONFIG.label} (API)`
-                    : "Lokaal — geen API key. Voeg OpenAI key toe in Studio → Settings."}
-                  {result.notes[0] ? ` · ${result.notes[0]}` : ""}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-line">
-          {!captureFailed && !capturing && (
-            <>
-              {(phase === "idle" || phase === "error") && (
-                <button
-                  onClick={() => void runOptimize()}
-                  disabled={!canRefine}
-                  className="px-4 py-1.5 text-xs rounded-md bg-accent text-white font-semibold shadow-md shadow-accent/20 hover:brightness-110 active:scale-[0.98] transition disabled:opacity-40 disabled:shadow-none"
-                >
-                  Refine
-                </button>
-              )}
-              {busy && (
-                <span className="px-4 py-1.5 text-xs rounded-md bg-accent/20 text-accent font-medium animate-pulse">
-                  Refining…
-                </span>
-              )}
-              {phase === "done" && (
-                <>
-                  <button
-                    onClick={() => void runOptimize()}
-                    className="px-3 py-1.5 text-xs rounded-md border border-line text-slate-200 hover:border-accent/50"
-                  >
-                    Refine again
-                  </button>
-                  <button
-                    onClick={onApply}
-                    disabled={!result}
-                    className="px-3 py-1.5 text-xs rounded-md bg-accent text-white font-medium disabled:opacity-40"
-                  >
-                    Apply
-                  </button>
-                  <button
-                    onClick={onCopy}
-                    disabled={!result}
-                    className="px-3 py-1.5 text-xs rounded-md border border-line text-slate-200 disabled:opacity-40"
-                  >
-                    Copy
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => api.openSettings()}
-                className="px-3 py-1.5 text-xs rounded-md border border-line text-slate-200"
+              <div
+                className={`flex-1 apple-glass-panel relative rounded-[26px] h-[150px] overflow-hidden ${
+                  phase === "error" ? "ring-1 ring-warn/50" : busy ? "ring-1 ring-white/20" : ""
+                }`}
               >
-                Settings
-              </button>
-            </>
-          )}
-          <button
-            onClick={() => api.hideOverlay()}
-            className={`${captureFailed ? "" : "ml-auto "} px-3 py-1.5 text-xs rounded-md text-muted hover:text-slate-200`}
-          >
-            Dismiss
-          </button>
+                <textarea
+                  value={showOutput ? outputValue : ""}
+                  onChange={(e) => setOutputText(e.target.value)}
+                  readOnly={busy || capturing || phase === "error"}
+                  aria-label="Refined prompt output"
+                  placeholder={outputPlaceholder}
+                  className="w-full h-full bg-transparent border-0 px-3.5 py-3 pr-2 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none disabled:opacity-70 scroll-thin"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 px-1 min-h-[36px]">
+              <div className="flex items-center gap-3 min-w-0">
+                <ModelPicker model={model} onChange={setModel} disabled={controlsDisabled} />
+                <span className="sr-only">{modelLabel}</span>
+              </div>
+
+              <div className="flex items-center gap-2 ml-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={() => api.hideOverlay()}
+                  className="text-[15px] text-white/45 hover:text-white/65 transition shrink-0 -ml-1.5"
+                >
+                  Discard
+                </button>
+                <GlassPill onClick={onApply} disabled={!canApplyOrCopy}>
+                  Apply
+                </GlassPill>
+                <GlassPill onClick={() => void onCopy()} disabled={!canApplyOrCopy}>
+                  Copy
+                </GlassPill>
+              </div>
+            </div>
+          </>
+        )}
         </div>
       </div>
     </div>

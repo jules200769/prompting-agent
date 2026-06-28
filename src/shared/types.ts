@@ -33,16 +33,11 @@ export const REWRITE_CONFIG = {
   provider: "openai" as const,
   modelId: "gpt-4.1-mini",
   label: "GPT-4.1 mini",
-};
+  /** Fixed optimal temperature — never varies by level or user setting. */
+  temperature: 0.3,
+} as const;
 
-/** OpenAI temperature per optimization level (L1 = cool, L4 = max). */
-export const LEVEL_TEMPERATURE: Record<OptLevel, number> = {
-  1: 0.2,
-  2: 0.5,
-  3: 0.75,
-  4: 1.0,
-};
-
+/** Guide structure adherence labels (L1 = cool, L4 = max). */
 export const LEVEL_LABELS: Record<OptLevel, string> = {
   1: "Cool",
   2: "Warm",
@@ -79,6 +74,8 @@ export interface OptimizeResult {
   notes: string[];
   model: ModelId;
   level: OptLevel;
+  /** Measured guide-structure adherence of the optimized prompt (Cool/Warm/Hot/Max). */
+  adherenceLevel: OptLevel;
   source: "llm" | "local";
   packVersion: string;
 }

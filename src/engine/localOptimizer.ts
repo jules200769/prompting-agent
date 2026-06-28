@@ -1,9 +1,9 @@
 // Local fallback optimizer: guide-aware deterministic templates when no API key.
 
 import type { DiffSegment, ModelId, OptLevel, OptimizeResult, SubScores } from "../shared/types";
-import { LEVEL_LABELS, LEVEL_TEMPERATURE } from "../shared/types";
+import { LEVEL_LABELS } from "../shared/types";
 import { getPack } from "./packs";
-import { analyze } from "./rubric";
+import { analyze, adherenceLevel } from "./rubric";
 import { buildDiff } from "./diff";
 
 function derivePersona(prompt: string): string {
@@ -157,10 +157,11 @@ export function optimizeLocal(req: {
   const persona = (req.persona && req.persona.trim()) || derivePersona(req.prompt);
   const optimized = buildGuideOptimized(req.model, req.level, req.prompt, persona);
   const post = analyze(optimized);
+  const measuredAdherence = adherenceLevel(post.subscores);
+  const adherenceLabel = LEVEL_LABELS[measuredAdherence];
   const diff: DiffSegment[] = buildDiff(req.prompt, optimized);
   const subscores: SubScores = post.subscores;
   const levelLabel = LEVEL_LABELS[req.level];
-  const temp = LEVEL_TEMPERATURE[req.level];
 
   return {
     optimizedPrompt: optimized,
@@ -171,11 +172,13 @@ export function optimizeLocal(req: {
     diff,
     personaSuggestion: req.level >= 2 ? persona : "",
     notes: [
-      `Applied ${pack.label} prompting guide (L${req.level} ${levelLabel}, temp ${temp}).`,
+      `Applied ${pack.label} prompting guide (L${req.level} ${levelLabel} target).`,
+      `Guide-structuur: ${adherenceLabel} (L${measuredAdherence}).`,
       "Local optimizer (no API key). Add OpenAI key in Settings for LLM refinement.",
     ],
     model: req.model,
     level: req.level,
+    adherenceLevel: measuredAdherence,
     source: "local",
     packVersion: pack.version,
   };
