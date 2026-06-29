@@ -10,6 +10,7 @@ type OverlayShowPayload = {
 
 const overlayShowCallbacks = new Set<(payload: OverlayShowPayload) => void>();
 const overlayCapturePendingCallbacks = new Set<() => void>();
+const overlayClearCallbacks = new Set<() => void>();
 let lastOverlayShow: OverlayShowPayload | null = null;
 let lastOverlayCapturePending = false;
 
@@ -38,6 +39,7 @@ ipcRenderer.on(IPC.OVERLAY_CAPTURE_PENDING, () => {
 ipcRenderer.on(IPC.OVERLAY_CLEAR, () => {
   lastOverlayShow = null;
   lastOverlayCapturePending = false;
+  for (const cb of overlayClearCallbacks) cb();
 });
 
 const api = {
@@ -74,26 +76,40 @@ const api = {
   openStudio: () => ipcRenderer.send(IPC.STUDIO_SHOW),
   openSettings: () => ipcRenderer.send(IPC.STUDIO_SETTINGS),
   hideOverlay: () => ipcRenderer.send(IPC.OVERLAY_HIDE),
+  overlayPrepared: () => ipcRenderer.send(IPC.OVERLAY_PREPARED),
 
-  onStudioRoute: (cb: (route: string) => void) => {
+  onStudioRoute: (cb: (route: string) => void): (() => void) => {
     const l = (_e: unknown, route: string) => {
       window.dispatchEvent(new CustomEvent("promptforge:studio:route", { detail: route }));
       cb(route);
     };
     ipcRenderer.on(IPC.STUDIO_ROUTE, l);
-    return () => ipcRenderer.removeListener(IPC.STUDIO_ROUTE, l);
+    return () => {
+      ipcRenderer.removeListener(IPC.STUDIO_ROUTE, l);
+    };
   },
 
-  onOverlayShow: (cb: (payload: OverlayShowPayload) => void) => {
+  onOverlayShow: (cb: (payload: OverlayShowPayload) => void): (() => void) => {
     overlayShowCallbacks.add(cb);
     if (lastOverlayShow) cb(lastOverlayShow);
-    return () => overlayShowCallbacks.delete(cb);
+    return () => {
+      overlayShowCallbacks.delete(cb);
+    };
   },
 
-  onOverlayCapturePending: (cb: () => void) => {
+  onOverlayCapturePending: (cb: () => void): (() => void) => {
     overlayCapturePendingCallbacks.add(cb);
     if (lastOverlayCapturePending) cb();
-    return () => overlayCapturePendingCallbacks.delete(cb);
+    return () => {
+      overlayCapturePendingCallbacks.delete(cb);
+    };
+  },
+
+  onOverlayClear: (cb: () => void): (() => void) => {
+    overlayClearCallbacks.add(cb);
+    return () => {
+      overlayClearCallbacks.delete(cb);
+    };
   },
 };
 

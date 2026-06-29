@@ -176,6 +176,7 @@ export const IPC = {
   HISTORY_CLEAR: "promptforge:history:clear",
   OVERLAY_SHOW: "promptforge:overlay:show",
   OVERLAY_CAPTURE_PENDING: "promptforge:overlay:capture-pending",
+  OVERLAY_PREPARED: "promptforge:overlay:prepared",
   OVERLAY_HIDE: "promptforge:overlay:hide",
   OVERLAY_CLEAR: "promptforge:overlay:clear",
   STUDIO_SHOW: "promptforge:studio:show",

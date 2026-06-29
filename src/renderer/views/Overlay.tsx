@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import { api } from "../api";
 import type { CaptureMode, ModelId, OptLevel } from "../../shared/types";
 import { MODELS, LEVEL_LABELS } from "../../shared/types";
@@ -247,6 +248,7 @@ export function Overlay() {
   const [outputText, setOutputText] = useState("");
   const [hasGenerated, setHasGenerated] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [shellVisible, setShellVisible] = useState(false);
   const captureRef = useRef<{ text: string; mode: CaptureMode; snapshot: { text: string; hasText: boolean } } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const keyStateRef = useRef({ mode, phase, captureFailed: false });
@@ -256,6 +258,30 @@ export function Overlay() {
   });
 
   keyStateRef.current = { mode, phase, captureFailed: mode === "empty" };
+
+  function ackOverlayPrepared(): void {
+    void document.body.offsetHeight;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        api.overlayPrepared();
+      });
+    });
+  }
+
+  function resetOverlaySession(): void {
+    flushSync(() => {
+      captureRef.current = null;
+      setMode("field");
+      setPrompt("");
+      setPhase("idle");
+      setStreamed("");
+      setOutputText("");
+      setHasGenerated(false);
+      setMenuOpen(false);
+      setShellVisible(false);
+    });
+    ackOverlayPrepared();
+  }
 
   useEffect(() => {
     (async () => {
@@ -269,18 +295,22 @@ export function Overlay() {
       mode: CaptureMode;
       snapshot: { text: string; hasText: boolean };
     }) => {
-      captureRef.current = {
-        text: detail.text,
-        mode: detail.mode,
-        snapshot: detail.snapshot ?? { text: "", hasText: false },
-      };
-      setMode(detail.mode);
-      setPrompt(detail.text);
-      setPhase("idle");
-      setStreamed("");
-      setOutputText("");
-      setHasGenerated(false);
-      setMenuOpen(false);
+      flushSync(() => {
+        captureRef.current = {
+          text: detail.text,
+          mode: detail.mode,
+          snapshot: detail.snapshot ?? { text: "", hasText: false },
+        };
+        setMode(detail.mode);
+        setPrompt(detail.text);
+        setPhase("idle");
+        setStreamed("");
+        setOutputText("");
+        setHasGenerated(false);
+        setMenuOpen(false);
+        setShellVisible(true);
+      });
+      ackOverlayPrepared();
     };
 
     const onCapturePending = () => {
@@ -292,13 +322,16 @@ export function Overlay() {
       setOutputText("");
       setHasGenerated(false);
       setMenuOpen(false);
+      ackOverlayPrepared();
     };
 
     const offPending = api.onOverlayCapturePending(onCapturePending);
     const offShow = api.onOverlayShow(applyCapture);
+    const offClear = api.onOverlayClear(resetOverlaySession);
     return () => {
       offPending?.();
       offShow?.();
+      offClear?.();
     };
   }, []);
 
@@ -384,7 +417,7 @@ export function Overlay() {
 
   return (
     <div className="overlay-font w-full h-full flex items-center justify-center px-12">
-      <div className="relative w-full max-w-[578px]">
+      <div className={`relative w-full max-w-[578px] ${shellVisible ? "" : "invisible"}`}>
         <div ref={menuRef} className="absolute top-10 -right-10 z-10">
           <button
             type="button"
@@ -434,7 +467,7 @@ export function Overlay() {
                     readOnly={busy || capturing}
                     aria-label="Original prompt"
                     placeholder={capturing ? "Capturing…" : "Prompt input…"}
-                    className="w-full h-full bg-transparent border-0 px-3.5 py-3 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none disabled:opacity-70 scroll-thin"
+                    className="w-full h-full bg-transparent border-0 px-3.5 py-3 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none scroll-thin"
                   />
                 </div>
                 <div className="pl-1 mt-1 flex items-center gap-3">
@@ -456,7 +489,7 @@ export function Overlay() {
                   readOnly={busy || capturing || phase === "error"}
                   aria-label="Refined prompt output"
                   placeholder={outputPlaceholder}
-                  className="w-full h-full bg-transparent border-0 px-3.5 py-3 pr-2 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none disabled:opacity-70 scroll-thin"
+                  className="w-full h-full bg-transparent border-0 px-3.5 py-3 pr-2 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none scroll-thin"
                 />
               </div>
             </div>

@@ -39,6 +39,8 @@ let studio: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let pendingCapture: { text: string; mode: CaptureMode; snapshot: { text: string; hasText: boolean } } | null = null;
 let isOptimizing = false;
+let hotkeyInFlight = false;
+let overlayPreparedResolve: (() => void) | null = null;
 
 function loadUrl(win: BrowserWindow, route: string): void {
   if (isDev) {
@@ -55,6 +57,8 @@ function createOverlay(): BrowserWindow {
     show: false,
     frame: false,
     transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -67,11 +71,11 @@ function createOverlay(): BrowserWindow {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
-      backgroundThrottling: true,
+      backgroundThrottling: false,
     },
   });
   w.on("blur", () => {
-    if (w.isVisible()) hideOverlay();
+    if (w.isVisible()) void hideOverlay();
   });
   loadUrl(w, "/overlay");
   return w;
@@ -114,17 +118,29 @@ function positionOverlayCenter(): void {
   overlay.setPosition(x, y);
 }
 
-function showOverlay(): void {
-  if (!overlay) overlay = createOverlay();
-  positionOverlayCenter();
-  overlay.showInactive();
-  // Do not call overlay.focus() — keeps target app's focus hwnd stable for Apply.
+/** Wait until the renderer has applied pending/show state (avoids stale-content flash). */
+function waitForOverlayPrepared(timeoutMs = 200): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      overlayPreparedResolve = null;
+      resolve();
+    }, timeoutMs);
+    overlayPreparedResolve = () => {
+      clearTimeout(timer);
+      overlayPreparedResolve = null;
+      resolve();
+    };
+  });
 }
 
-function showOverlayPending(): void {
+/** Show overlay once per hotkey — skip if already visible (no 2nd showInactive / reposition). */
+function revealOverlay(): void {
   if (!overlay) overlay = createOverlay();
-  overlay.webContents.send(IPC.OVERLAY_CAPTURE_PENDING);
-  showOverlay();
+  if (overlay.isVisible()) return;
+  positionOverlayCenter();
+  // Hide compositor white flash on transparent windows until renderer paints.
+  overlay.setOpacity(0);
+  overlay.showInactive();
 }
 
 async function deliverCaptureToOverlay(capture: {
@@ -139,18 +155,51 @@ async function deliverCaptureToOverlay(capture: {
     });
   }
   pendingCapture = capture;
+  const prepared = waitForOverlayPrepared();
   overlay.webContents.send(IPC.OVERLAY_SHOW, {
     text: capture.text,
     mode: capture.mode,
     snapshot: capture.snapshot,
   });
-  showOverlay();
+  await prepared;
+  if (!overlay.isVisible()) {
+    revealOverlay();
+    overlay.webContents.invalidate();
+    // One compositor tick before fade-in (reduces white flash on transparent win).
+    await sleep(16);
+  }
+  overlay.setOpacity(1);
 }
 
-function hideOverlay(): void {
-  if (overlay?.isVisible()) overlay.hide();
+async function hideOverlay(): Promise<void> {
+  if (!overlay) return;
   pendingCapture = null;
-  overlay?.webContents.send(IPC.OVERLAY_CLEAR);
+  if (overlay.isVisible()) {
+    overlay.setOpacity(0);
+  }
+  const prepared = waitForOverlayPrepared();
+  overlay.webContents.send(IPC.OVERLAY_CLEAR);
+  await prepared;
+  if (overlay.isVisible()) {
+    overlay.hide();
+  }
+  // Stay at opacity 0 until the next reveal paints fresh content.
+  overlay.setOpacity(0);
+}
+
+/** Prime hidden framebuffer to blank session state (matches first hotkey after reload). */
+async function primeOverlayBuffer(): Promise<void> {
+  if (!overlay) return;
+  if (overlay.webContents.isLoading()) {
+    await new Promise<void>((resolve) => {
+      overlay!.webContents.once("did-finish-load", () => resolve());
+    });
+  }
+  await sleep(32);
+  const prepared = waitForOverlayPrepared();
+  overlay.webContents.send(IPC.OVERLAY_CLEAR);
+  await prepared;
+  overlay.setOpacity(0);
 }
 
 function sendStudioRoute(route: string): void {
@@ -186,20 +235,26 @@ async function hideForCapture(): Promise<void> {
 }
 
 async function triggerHotkey(): Promise<void> {
-  // Debounce: ignore if overlay already visible or an optimization is running.
-  if (isOptimizing) return;
+  if (hotkeyInFlight || isOptimizing) return;
   if (overlay && overlay.isVisible()) {
-    hideOverlay();
+    await hideOverlay();
     return;
   }
-  showOverlayPending();
-  await hotkeySnapshot();
-  prepareCaptureTarget();
-  if (!canUseEarlyCaptureFastPath()) {
-    await hideForCapture();
+
+  hotkeyInFlight = true;
+  try {
+    await hotkeySnapshot();
+    prepareCaptureTarget();
+
+    if (!canUseEarlyCaptureFastPath()) {
+      await hideForCapture();
+    }
+
+    const capture = await captureSelection();
+    await deliverCaptureToOverlay(capture);
+  } finally {
+    hotkeyInFlight = false;
   }
-  const capture = await captureSelection();
-  await deliverCaptureToOverlay(capture);
 }
 
 function registerHotkey(settings: AppSettings): void {
@@ -261,7 +316,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.CAPTURE_INJECT, async (_evt, text: string, snapshot: { text: string; hasText: boolean }) => {
     const snap = snapshot || pendingCapture?.snapshot || { text: "", hasText: false };
     // Hide overlay first so it does not steal focus; avoid resizing the target via inject.
-    hideOverlay();
+    await hideOverlay();
     await sleep(250);
     const res = await injectText(text, snap);
     return res;
@@ -269,7 +324,7 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.CAPTURE_COPY, async (_evt, text: string) => {
     await copyToClipboard(text, pendingCapture?.snapshot || { text: "", hasText: false });
-    hideOverlay();
+    await hideOverlay();
     return true;
   });
 
@@ -305,7 +360,12 @@ function registerIpc(): void {
   ipcMain.handle(IPC.HISTORY_LIST, () => store.listHistory());
   ipcMain.handle(IPC.HISTORY_CLEAR, () => { store.clearHistory(); return true; });
 
-  ipcMain.on(IPC.OVERLAY_HIDE, () => hideOverlay());
+  ipcMain.on(IPC.OVERLAY_HIDE, () => {
+    void hideOverlay();
+  });
+  ipcMain.on(IPC.OVERLAY_PREPARED, () => {
+    overlayPreparedResolve?.();
+  });
   ipcMain.on(IPC.STUDIO_SHOW, () => ensureStudio());
   ipcMain.on(IPC.STUDIO_SETTINGS, () => ensureStudio("settings"));
   ipcMain.on(IPC.TRAY_QUIT, () => app.quit());
@@ -330,6 +390,7 @@ app.whenReady().then(() => {
   startForegroundTracking(getSkipCaptureHwnds, getStudioFallbackHwnd);
   warmCaptureBridge();
   overlay = createOverlay();
+  void primeOverlayBuffer();
   const settings = store.getSettings();
   registerHotkey(settings);
 
