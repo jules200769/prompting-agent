@@ -4,6 +4,7 @@ import {
   DEFAULT_SETTINGS,
   MODELS,
   type CaptureMode,
+  type InjectResult,
   type OptimizeRequest,
   type OptimizeResult,
   type Provider,
@@ -104,7 +105,7 @@ function createBrowserMock(): PromptForgeAPI {
     captureTrigger: async () => undefined,
     captureInject: async () => {
       console.info("[promptforge mock] Apply (inject) called — no-op in browser preview");
-      return undefined;
+      return "injected" as InjectResult;
     },
     captureCopy: async (text: string) => {
       try {

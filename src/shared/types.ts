@@ -47,6 +47,8 @@ export const LEVEL_LABELS: Record<OptLevel, string> = {
 
 export type CaptureMode = "field" | "empty";
 
+export type InjectResult = "injected" | "copied";
+
 export interface SubScores {
   clarity: number;
   context: number;

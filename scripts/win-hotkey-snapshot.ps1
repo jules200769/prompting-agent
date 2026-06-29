@@ -40,7 +40,7 @@ function Test-IsTextControl($el) {
     $ct = $el.Current.ControlType.ProgrammaticName
     if ($ct -eq "ControlType.Edit" -or $ct -eq "ControlType.Document") { return $true }
     $cls = $el.Current.ClassName
-    if ($cls -match "editor|input|textarea|Omnibox|RichEdit") { return $true }
+    if ($cls -match "editor|input|textarea|Omnibox|RichEdit|aislash|monaco|ProseMirror|contenteditable") { return $true }
     if ($el.Current.IsKeyboardFocusable) {
       try {
         $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)

@@ -249,6 +249,7 @@ export function Overlay() {
   const [hasGenerated, setHasGenerated] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [shellVisible, setShellVisible] = useState(false);
+  const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const captureRef = useRef<{ text: string; mode: CaptureMode; snapshot: { text: string; hasText: boolean } } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const keyStateRef = useRef({ mode, phase, captureFailed: false });
@@ -278,6 +279,7 @@ export function Overlay() {
       setOutputText("");
       setHasGenerated(false);
       setMenuOpen(false);
+      setApplyNotice(null);
       setShellVisible(false);
     });
     ackOverlayPrepared();
@@ -308,6 +310,7 @@ export function Overlay() {
         setOutputText("");
         setHasGenerated(false);
         setMenuOpen(false);
+        setApplyNotice(null);
         setShellVisible(true);
       });
       ackOverlayPrepared();
@@ -322,6 +325,7 @@ export function Overlay() {
       setOutputText("");
       setHasGenerated(false);
       setMenuOpen(false);
+      setApplyNotice(null);
       ackOverlayPrepared();
     };
 
@@ -348,6 +352,7 @@ export function Overlay() {
 
   async function runOptimize() {
     if (!prompt.trim()) return;
+    setApplyNotice(null);
     setPhase("optimizing");
     setStreamed("");
     setOutputText("");
@@ -370,7 +375,11 @@ export function Overlay() {
 
   async function onApply() {
     if (!outputText.trim() || phase !== "done") return;
-    await api.captureInject(outputText, captureRef.current?.snapshot ?? { text: "", hasText: false });
+    setApplyNotice(null);
+    const res = await api.captureInject(outputText, captureRef.current?.snapshot ?? { text: "", hasText: false });
+    if (res === "copied") {
+      setApplyNotice("Couldn't insert — copied to clipboard");
+    }
   }
 
   async function onCopy() {
@@ -498,6 +507,11 @@ export function Overlay() {
               <div className="flex items-center gap-3 min-w-0">
                 <ModelPicker model={model} onChange={setModel} disabled={controlsDisabled} />
                 <span className="sr-only">{modelLabel}</span>
+                {applyNotice && (
+                  <span className="text-[13px] text-warn truncate" role="status">
+                    {applyNotice}
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-2 ml-auto shrink-0">

@@ -1,6 +1,6 @@
 // Preload: exposes a tight allowlist IPC API to the renderer. No Node globals leak.
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type OptimizeRequest, type AppSettings, type CaptureMode, type Provider } from "../shared/types";
+import { IPC, type OptimizeRequest, type AppSettings, type CaptureMode, type InjectResult, type Provider } from "../shared/types";
 
 type OverlayShowPayload = {
   text: string;
@@ -54,7 +54,7 @@ const api = {
 
   captureTrigger: () => ipcRenderer.invoke(IPC.CAPTURE_TRIGGER),
   captureInject: (text: string, snapshot: { text: string; hasText: boolean }) =>
-    ipcRenderer.invoke(IPC.CAPTURE_INJECT, text, snapshot),
+    ipcRenderer.invoke(IPC.CAPTURE_INJECT, text, snapshot) as Promise<InjectResult>,
   captureCopy: (text: string) => ipcRenderer.invoke(IPC.CAPTURE_COPY, text),
 
   settingsGet: () => ipcRenderer.invoke(IPC.SETTINGS_GET) as Promise<AppSettings>,

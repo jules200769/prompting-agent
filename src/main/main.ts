@@ -187,6 +187,31 @@ async function hideOverlay(): Promise<void> {
   overlay.setOpacity(0);
 }
 
+/** Hide overlay for inject without clearing renderer session (Apply may need to re-open on fallback). */
+async function hideOverlayForInject(): Promise<void> {
+  if (!overlay) return;
+  if (overlay.isVisible()) {
+    overlay.setOpacity(0);
+    overlay.hide();
+  }
+}
+
+async function finalizeOverlayAfterInject(): Promise<void> {
+  if (!overlay) return;
+  pendingCapture = null;
+  const prepared = waitForOverlayPrepared();
+  overlay.webContents.send(IPC.OVERLAY_CLEAR);
+  await prepared;
+}
+
+async function revealOverlayAfterInjectFallback(): Promise<void> {
+  if (!overlay) return;
+  revealOverlay();
+  overlay.webContents.invalidate();
+  await sleep(16);
+  overlay.setOpacity(1);
+}
+
 /** Prime hidden framebuffer to blank session state (matches first hotkey after reload). */
 async function primeOverlayBuffer(): Promise<void> {
   if (!overlay) return;
@@ -315,10 +340,15 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.CAPTURE_INJECT, async (_evt, text: string, snapshot: { text: string; hasText: boolean }) => {
     const snap = snapshot || pendingCapture?.snapshot || { text: "", hasText: false };
-    // Hide overlay first so it does not steal focus; avoid resizing the target via inject.
-    await hideOverlay();
+    // Hide overlay first so it does not steal focus; keep renderer state for clipboard fallback.
+    await hideOverlayForInject();
     await sleep(250);
     const res = await injectText(text, snap);
+    if (res === "injected") {
+      await finalizeOverlayAfterInject();
+    } else {
+      await revealOverlayAfterInjectFallback();
+    }
     return res;
   });
 
