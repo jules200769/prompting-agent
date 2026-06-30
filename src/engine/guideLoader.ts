@@ -5,6 +5,9 @@ import { join } from "node:path";
 import type { ModelId, OptLevel } from "../shared/types";
 import { LEVEL_LABELS } from "../shared/types";
 
+/** Bump when meta-prompt / structure contract changes — invalidates persisted opt cache. */
+export const REWRITE_PIPELINE_VERSION = 2;
+
 const GUIDE_FILES: Record<ModelId, string> = {
   "claude-opus-4.8": "opus4.8.md",
   "gpt-5": "gpt5.5.md",
@@ -133,12 +136,124 @@ function levelKeywords(level: OptLevel): string[] {
 export function getLevelRewriteInstruction(level: OptLevel): string {
   const label = LEVEL_LABELS[level];
   const lines: Record<OptLevel, string> = {
-    1: `Level 1 (Cool — ${label} guide structure): Minimal rewrite. Fix typos and ambiguity only. Keep the user's sentences and order. Apply only the lightest guide formatting if clearly beneficial.`,
-    2: `Level 2 (Warm — ${label} guide structure): Light model-native structure (e.g. XML tags for Claude, markdown headers for GPT). Preserve all user content; reorganize slightly for clarity.`,
-    3: `Level 3 (Hot — ${label} guide structure): Full guide-compliant structure — context, task, constraints, and output format sections as the guide prescribes. Do not invent facts; use brief placeholders only where the user left gaps.`,
-    4: `Level 4 (Max — ${label} guide structure): Apply the complete guide methodology including examples, verification/success criteria, and advanced patterns from the guide where relevant. Still preserve user intent.`,
+    1: `Level 1 (Cool — ${label} guide structure): Minimal rewrite only. Fix typos, capitalization, punctuation, and one-line ambiguities. Keep the user's sentences and order. No XML, no markdown headers, no role/persona, no new sections.`,
+    2: `Level 2 (Warm — ${label} guide structure): Light model-native structure per the STRUCTURE CONTRACT below. Preserve all user facts; a short role plus imperative task summary only in the instructions section — never duplicate the full prompt there.`,
+    3: `Level 3 (Hot — ${label} guide structure): Full guide-compliant structure per the STRUCTURE CONTRACT — for every task type (coding, writing, analysis). Do not invent facts; use brief placeholders only where the user left gaps.`,
+    4: `Level 4 (Max — ${label} guide structure): Everything in Level 3 plus examples and measurable success criteria per the STRUCTURE CONTRACT. Still preserve user intent and exact factual phrases.`,
   };
   return lines[level];
+}
+
+type StructureFormat = "xml" | "markdown" | "gemini" | "composer" | "deepseek";
+
+function structureFormat(model: ModelId): StructureFormat {
+  switch (model) {
+    case "gpt-5":
+      return "markdown";
+    case "gemini-3":
+      return "gemini";
+    case "composer-2.5":
+      return "composer";
+    case "deepseek-v3":
+      return "deepseek";
+    default:
+      return "xml";
+  }
+}
+
+/** Mandatory output shape per target model and level — enforced in buildMetaPrompt. */
+export function getLevelStructureContract(model: ModelId, level: OptLevel): string {
+  if (level === 1) {
+    return `STRUCTURE CONTRACT (mandatory):
+- Output plain prose only: NO XML tags, NO markdown section headers, NO role/persona block
+- Keep the user's sentence order; edit in place (typos, capitalization, punctuation, one-line clarifications only)
+- Do NOT paraphrase the full prompt or restructure into sections`;
+  }
+
+  const fmt = structureFormat(model);
+
+  if (fmt === "xml") {
+    if (level === 2) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Use exactly two XML sections: <instructions> and <input>
+- <instructions>: one short expert role (if helpful) + imperative task summary — do NOT paste the full user prompt here
+- <input>: the user's prompt verbatim (light typo fixes only); this is the source-of-truth text
+- Do NOT duplicate the same content across both tags`;
+    }
+    if (level === 3) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Use separate XML sections: <context>, <task>, <constraints>, <output_format> (optional brief <instructions> for role only)
+- Apply to ALL task types (coding, writing, analysis) — not only code tasks
+- <output_format>: specify the exact deliverable shape (e.g. email with Subject line; code plus brief change notes)
+- Use brief placeholders like [detail TBD] where the user left gaps; do not invent facts
+- Reframe negative constraints ("don't blame") as positive guidance where possible`;
+    }
+    return `STRUCTURE CONTRACT (mandatory):
+- Level 4 is Level 3 expanded — do NOT replace or collapse Level 3 sections into <instructions> alone
+- REQUIRED tags (all mandatory): <context>, <task>, <constraints>, <output_format>, <examples>, <success_criteria>
+- Optional: brief <instructions> for role only — never paste the full user prompt there
+- <examples>: at least one brief pattern showing desired tone, format, or answer structure (no invented facts)
+- <success_criteria>: 2–3 concrete, checkable criteria the final answer must satisfy
+- End with a brief verification line: confirm the deliverable meets every success criterion before finishing`;
+  }
+
+  if (fmt === "markdown") {
+    if (level === 2) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Use markdown headers: ## Instructions and ## Input
+- ## Instructions: short role + imperative task summary — do NOT paste the full user prompt here
+- ## Input: user prompt verbatim (light typo fixes only)
+- Do NOT duplicate content between sections`;
+    }
+    if (level === 3) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Use ## Context, ## Task, ## Constraints, ## Output format (optional ## Instructions for role)
+- Apply to ALL task types; specify exact deliverable shape in Output format
+- Use [detail TBD] placeholders for gaps; reframe negatives as positive guidance`;
+    }
+    return `STRUCTURE CONTRACT (mandatory):
+- Level 4 is Level 3 expanded — keep every Level 3 header; do not collapse into Instructions alone
+- REQUIRED: ## Context, ## Task, ## Constraints, ## Output format, ## Examples, ## Success criteria
+- End with a brief verification line before finishing`;
+  }
+
+  if (fmt === "gemini") {
+    if (level === 2) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Persona: one line. Task: imperative summary. Input: user prompt verbatim on its own line — no duplication`;
+    }
+    if (level === 3) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Separate Context, Task, Constraints, and Output blocks for all task types`;
+    }
+    return `STRUCTURE CONTRACT (mandatory):
+- Level 4 expands Level 3 — keep Context, Task, Constraints, and Output blocks; add Examples and Success criteria (2–3 checkable items)`;
+  }
+
+  if (fmt === "composer") {
+    if (level === 2) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Goal: imperative summary. Context: role only. Input: user prompt verbatim — no duplication`;
+    }
+    if (level === 3) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Goal, Context, Constraints, and Output format sections for all task types`;
+    }
+    return `STRUCTURE CONTRACT (mandatory):
+- Level 4 expands Level 3 — keep Goal, Context, Constraints, and Output format; add Examples and Success criteria (2–3 checkable items)`;
+  }
+
+  // deepseek
+  if (level === 2) {
+    return `STRUCTURE CONTRACT (mandatory):
+- Role + Task summary, then Input with user prompt verbatim — no duplication`;
+  }
+  if (level === 3) {
+    return `STRUCTURE CONTRACT (mandatory):
+- Context, Task, Constraints, and Output format for all task types`;
+  }
+  return `STRUCTURE CONTRACT (mandatory):
+- Level 4 expands Level 3 — keep Context, Task, Constraints, and Output format; add Examples and Success criteria (2–3 checkable items)`;
 }
 
 /** Clear cache (for tests). */

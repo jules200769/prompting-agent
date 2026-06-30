@@ -88,6 +88,8 @@ export interface OptimizeRequest {
   level: OptLevel;
   persona?: string;
   context?: string;
+  /** When true, bypass persisted opt cache (e.g. overlay Regenerate). */
+  skipCache?: boolean;
 }
 
 export interface LibraryItem {

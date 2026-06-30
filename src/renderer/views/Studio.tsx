@@ -90,6 +90,9 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
       const res = await api.optimize({ prompt, model, level, persona, context }, (c) => setStreamed((s) => s + c));
       setResult(res);
       setStreamed(res.optimizedPrompt);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setStreamed(`Error: ${msg}`);
     } finally {
       setBusy(false);
     }

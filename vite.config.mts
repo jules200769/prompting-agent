@@ -33,5 +33,15 @@ export default defineConfig({
     hmr: {
       overlay: false,
     },
+    proxy: {
+      "/api/optimize": {
+        target: "http://127.0.0.1:5174",
+        changeOrigin: true,
+      },
+      "/api/settings": {
+        target: "http://127.0.0.1:5174",
+        changeOrigin: true,
+      },
+    },
   },
 });

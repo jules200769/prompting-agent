@@ -2,9 +2,11 @@
 import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell, screen } from "electron";
 import { join } from "node:path";
 import { IPC, type AppSettings, type CaptureMode, type OptimizeRequest, type Provider } from "../shared/types";
-import { optimize, analyze } from "../engine/orchestrator";
+import { analyze } from "../engine/orchestrator";
 import * as store from "./storage";
 import { keyStore } from "./keyStore";
+import { runOptimize } from "./optimizeHandler";
+import { startDevBridge } from "./devBridge";
 import {
   rememberForeground,
   prepareCaptureTarget,
@@ -316,21 +318,11 @@ function buildTray(): void {
 function registerIpc(): void {
   ipcMain.handle(IPC.OPTIMIZE, async (evt, req: OptimizeRequest) => {
     const win = BrowserWindow.fromWebContents(evt.sender);
-    const hash = store.cacheHash(req);
-    const cached = store.getCache(hash, req.prompt);
-    if (cached) {
-      win?.webContents.send(IPC.OPTIMIZE_STREAM, cached.optimizedPrompt);
-      return cached;
-    }
     isOptimizing = true;
     try {
-      const result = await optimize({
-        request: req,
-        onText: (chunk) => win?.webContents.send(IPC.OPTIMIZE_STREAM, chunk),
+      return await runOptimize(req, (chunk) => {
+        win?.webContents.send(IPC.OPTIMIZE_STREAM, chunk);
       });
-      store.setCache(hash, result);
-      store.addHistory(result, req.prompt);
-      return result;
     } finally {
       isOptimizing = false;
     }
@@ -435,6 +427,7 @@ app.whenReady().then(() => {
   void primeOverlayBuffer();
   const settings = store.getSettings();
   registerHotkey(settings);
+  if (isDev) startDevBridge();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) ensureStudio();

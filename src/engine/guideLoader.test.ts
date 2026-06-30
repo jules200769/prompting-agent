@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { clearGuideCache, getGuideExcerpt, getLevelRewriteInstruction, loadGuideFull } from "./guideLoader";
+import { clearGuideCache, getGuideExcerpt, getLevelRewriteInstruction, getLevelStructureContract, loadGuideFull } from "./guideLoader";
 import { REWRITE_CONFIG } from "../shared/types";
 
 describe("guideLoader", () => {
@@ -36,7 +36,26 @@ describe("guideLoader", () => {
       expect(instruction.toLowerCase()).not.toContain("temperature");
       expect(instruction).toContain("guide structure");
     }
-    expect(getLevelRewriteInstruction(4).length).toBeGreaterThan(getLevelRewriteInstruction(1).length);
+    expect(getLevelStructureContract("claude-opus-4.8", 4).length).toBeGreaterThan(
+      getLevelStructureContract("claude-opus-4.8", 1).length,
+    );
+    expect(getLevelRewriteInstruction(1).toLowerCase()).toContain("no xml");
+  });
+
+  it("structure contracts enforce level differentiation for Claude", () => {
+    const cool = getLevelStructureContract("claude-opus-4.8", 1);
+    const warm = getLevelStructureContract("claude-opus-4.8", 2);
+    const hot = getLevelStructureContract("claude-opus-4.8", 3);
+    const max = getLevelStructureContract("claude-opus-4.8", 4);
+
+    expect(cool.toLowerCase()).toContain("plain prose");
+    expect(warm).toContain("<instructions>");
+    expect(warm).toContain("<input>");
+    expect(hot).toContain("<output_format>");
+    expect(max).toContain("<examples>");
+    expect(max).toContain("<success_criteria>");
+    expect(max).toContain("<constraints>");
+    expect(max).toContain("<output_format>");
   });
 
   it("rewrite API uses fixed temperature", () => {
@@ -54,8 +73,19 @@ describe("buildMetaPrompt", () => {
     });
     expect(system).toContain("PROMPTING GUIDE");
     expect(system).toContain("Claude Opus 4.8");
+    expect(system).toContain("STRUCTURE CONTRACT");
     expect(system).toContain("plain text");
     expect(user).toContain("write a cold email");
+  });
+
+  it("includes action language rules from level 2 upward", async () => {
+    const { buildMetaPrompt } = await import("./providers");
+    const l1 = buildMetaPrompt({ prompt: "fix my app", model: "claude-opus-4.8", level: 1 });
+    const l3 = buildMetaPrompt({ prompt: "fix my app", model: "claude-opus-4.8", level: 3 });
+    expect(l1.system).not.toContain("ACTION & DELIVERABLE LANGUAGE");
+    expect(l3.system).toContain("ACTION & DELIVERABLE LANGUAGE");
+    expect(l3.system).toContain("CONSTRAINT FRAMING");
+    expect(l3.system).toContain("Implement");
   });
 });
 
@@ -69,8 +99,32 @@ describe("optimizeLocal", () => {
     });
     expect(res.optimizedPrompt).toContain("<task>");
     expect(res.optimizedPrompt).toContain("<constraints>");
+    expect(res.optimizedPrompt).toContain("<output_format>");
     expect(res.source).toBe("local");
     expect(res.adherenceLevel).toBeGreaterThanOrEqual(1);
+  });
+
+  it("uses instructions and input at level 2 for Claude", async () => {
+    const { optimizeLocal } = await import("./localOptimizer");
+    const res = optimizeLocal({
+      prompt: "please help me write a cold email",
+      model: "claude-opus-4.8",
+      level: 2,
+    });
+    expect(res.optimizedPrompt).toContain("<instructions>");
+    expect(res.optimizedPrompt).toContain("<input>");
+    expect(res.optimizedPrompt).toContain("cold email");
+  });
+
+  it("adds examples and success criteria at level 4 for Claude", async () => {
+    const { optimizeLocal } = await import("./localOptimizer");
+    const res = optimizeLocal({
+      prompt: "please help me write a cold email",
+      model: "claude-opus-4.8",
+      level: 4,
+    });
+    expect(res.optimizedPrompt).toContain("<examples>");
+    expect(res.optimizedPrompt).toContain("<success_criteria>");
   });
 
   it("keeps minimal output at level 1", async () => {

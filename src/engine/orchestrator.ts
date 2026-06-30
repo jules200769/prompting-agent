@@ -1,5 +1,4 @@
-// Optimization orchestrator: picks LLM (BYOK) vs local fallback, loads model
-// guides, streams plain refined prompt, scores locally via rubric.
+// Optimization orchestrator: BYOK rewrite via OpenAI, model guides, local rubric scoring.
 
 import type { ModelId, OptLevel, OptimizeRequest, OptimizeResult } from "../shared/types";
 import { LEVEL_LABELS } from "../shared/types";
@@ -7,10 +6,14 @@ import { rewriteProviderForTarget } from "../shared/rewrite";
 import { getPack } from "./packs";
 import { analyze, adherenceLevel, emptySubscores } from "./rubric";
 import { buildDiff } from "./diff";
-import { optimizeLocal } from "./localOptimizer";
 import { stripResponseArtifacts } from "./cleanRewrite";
 import { optimizeStream } from "./providers";
 import { keyStore } from "../main/keyStore";
+
+function rewriteError(err: unknown): Error {
+  if (err instanceof Error) return err;
+  return new Error(String(err));
+}
 
 export interface OptimizeContext {
   request: OptimizeRequest;
@@ -26,14 +29,7 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
   const apiKey = await keyStore.get(rewriteProviderForTarget(request.model));
 
   if (!apiKey) {
-    const local = optimizeLocal({
-      prompt: request.prompt,
-      model: request.model,
-      level: request.level,
-      persona: request.persona,
-    });
-    ctx.onText(local.optimizedPrompt);
-    return local;
+    throw new Error("OpenAI API key not configured. Add your key in Settings.");
   }
 
   let raw = "";
@@ -47,28 +43,26 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
         context: request.context,
         apiKey,
       },
-      { onText: (c) => { raw += c; } },
+      {
+        onText: (chunk) => {
+          raw += chunk;
+          ctx.onText(chunk);
+        },
+      },
     );
     raw = res.text;
   } catch (err: unknown) {
-    const local = optimizeLocal({
-      prompt: request.prompt,
-      model: request.model,
-      level: request.level,
-      persona: request.persona,
-    });
-    const msg = err instanceof Error ? err.message : String(err);
-    ctx.onText(local.optimizedPrompt);
-    return { ...local, notes: [`Provider error: ${msg}`, ...local.notes] };
+    throw rewriteError(err);
   }
 
   const optimizedPrompt = stripResponseArtifacts(raw);
+  if (!optimizedPrompt.trim()) {
+    throw new Error("Rewrite API returned empty output.");
+  }
   const post = analyze(optimizedPrompt);
   const measuredAdherence = adherenceLevel(post.subscores);
   const adherenceLabel = LEVEL_LABELS[measuredAdherence];
   const diff = buildDiff(request.prompt, optimizedPrompt);
-
-  ctx.onText(optimizedPrompt);
 
   const notes = [
     `Applied ${pack.label} prompting guide (L${request.level} ${levelLabel} target).`,

@@ -37,7 +37,7 @@ function buildGuideOptimized(model: ModelId, level: OptLevel, original: string, 
 
   switch (model) {
     case "claude-opus-4.8":
-      return buildClaude(intent, persona, level);
+      return buildClaude(original, intent, persona, level);
     case "gpt-5":
       return buildGpt(intent, persona, level);
     case "gemini-3":
@@ -53,9 +53,13 @@ function buildGuideOptimized(model: ModelId, level: OptLevel, original: string, 
   }
 }
 
-function buildClaude(intent: string, persona: string, level: OptLevel): string {
+function buildClaude(original: string, intent: string, persona: string, level: OptLevel): string {
+  if (level === 2) {
+    return `<instructions>\nYou are ${persona}. ${intent}\n</instructions>\n<input>\n${original.trim()}\n</input>`;
+  }
+
   const parts: string[] = [];
-  if (level >= 2) parts.push(`<role>You are ${persona}.</role>`);
+  parts.push(`<instructions>\nYou are ${persona}.\n</instructions>`);
   parts.push(`<task>${intent}</task>`);
   if (level >= 3) {
     parts.push(`<context>[Add relevant background and audience here.]</context>`);
@@ -63,8 +67,9 @@ function buildClaude(intent: string, persona: string, level: OptLevel): string {
     parts.push(`<output_format>[Exact response shape.]</output_format>`);
   }
   if (level >= 4) {
-    parts.push(`<success_criteria>[What makes the output good?]</success_criteria>`);
-    parts.push(`Think step by step before producing the final answer.`);
+    parts.push(`<examples>[Brief desired output pattern.]</examples>`);
+    parts.push(`<success_criteria>[2–3 checkable criteria.]</success_criteria>`);
+    parts.push(`Before finishing, verify the deliverable meets every success criterion.`);
   }
   return parts.join("\n");
 }

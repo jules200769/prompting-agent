@@ -4,7 +4,13 @@
 > model-specific, high-performance versions before they reach the AI — summoned by a global
 > hotkey from any text box on the system.
 
-**Status:** Concept v1.0 · Author: Product Architecture · Date: Jun 2026
+**Status:** Concept v1.0 (market/vision) · Technical sections updated to **as-built v0.1** · Date: Jun 2026
+
+> **Reading note.** Sections 1–4 (vision, market, competition, workflow) describe the original
+> product thesis and still hold. Sections **5, 6, 8, and 13** have been rewritten to match what is
+> actually built today: a **local-only Electron app** with a **single OpenAI rewrite model** and
+> **prompting guides shipped as files** — not the original Tauri + cloud-backend design. Sections
+> 7, 9–12 still describe the longer-term vision and are not yet implemented.
 
 ---
 
@@ -196,44 +202,43 @@ by switching costs from saved prompt libraries and persona memory.
 ### Primary flow: hotkey → optimize → inject
 
 The user is typing a prompt into any text box (ChatGPT Desktop, Cursor, a browser, Word,
-Notion, a terminal). No OS exposes "the selected text" to a foreign app, so the proven
-pattern is hotkey → simulate copy → read clipboard → optimize → re-inject
-([Gets the user selected text? · tauri-apps Discussion #5624](https://github.com/tauri-apps/tauri/discussions/5624),
-[How do I get the selected text from the focused window using native Win32 API?](https://stackoverflow.com/questions/2251578/how-do-i-get-the-selected-text-from-the-focused-window-using-native-win32-api),
-[I Built a Local Voice-to-Text App with Tauri 2.0, whisper.cpp, and llama.cpp](https://dev.to/auratech/i-built-a-local-voice-to-text-app-with-rust-tauri-20-whispercpp-and-llamacpp-heres-how-32h5)).
+Notion, a terminal). The primary capture path reads the focused field's value through the
+**Windows UI Automation `TextPattern`** API (driven by PowerShell helper scripts), with a
+**clipboard copy fallback** when UIA cannot read the field. Apply writes the optimized text
+back via UIA `ValuePattern`/`TextPattern` (or a paste cascade), and terminals are
+**copy-only** ([How do I get the selected text from the focused window using native Win32 API?](https://stackoverflow.com/questions/2251578/how-do-i-get-the-selected-text-from-the-focused-window-using-native-win32-api)).
 
 ```mermaid
 sequenceDiagram
     participant U as User
     participant App as Focused App (any)
-    participant HK as Tauri GlobalShortcut
-    participant Core as Rust Core
-    participant Clip as Clipboard (arboard)
-    participant Inj as Input Sim (enigo)
-    participant API as PromptForge API
-    participant LLM as Provider LLM
+    participant HK as Electron globalShortcut
+    participant Main as Electron Main (Node)
+    participant PS as PowerShell + UIA (koffi)
+    participant Eng as Local Engine (src/engine)
+    participant API as OpenAI (gpt-4.1-mini)
 
-    U->>App: Types/selects a rough prompt
-    U->>HK: Presses CTRL+SHIFT++ (global)
-    HK->>Core: fires event
-    Core->>Core: save clipboard snapshot (restore later)
-    Core->>Inj: simulate Ctrl+C (SendInput)
-    Inj->>App: copies selection
-    Core->>Clip: readText()
-    Clip-->>Core: original prompt
-    Core->>Core: show floating overlay (model + level)
-    U->>Core: picks target model + optimization level
-    Core->>API: optimize(prompt, model, level, persona)
-    API->>API: select prompt-pack (model x level), run analysis
-    API->>LLM: meta-prompt rewrite (streaming)
-    LLM-->>API: optimized prompt + score + diff
-    API-->>Core: streamed result
-    Core->>Core: render overlay: score, diff, copy/inject
-    U->>Core: choose Inject (or Copy)
-    Core->>Inj: select-all + paste optimized text (SendInput)
-    Inj->>App: replaces text in box
-    Core->>Clip: restore original clipboard snapshot
-    Core->>Core: persist optimization locally (opt-in sync)
+    U->>App: Types a rough prompt
+    U->>HK: Presses Ctrl+Shift+O (global)
+    HK->>Main: fires event (hotkeySnapshot)
+    Main->>PS: capture focused field (UIA TextPattern)
+    PS-->>Main: original prompt + field metadata
+    Main->>Main: show floating overlay (model + level)
+    U->>Main: edits text / picks model + level / clicks Refine
+    Main->>Eng: optimize(prompt, model, level, persona)
+    Eng->>Eng: load prompting-guide excerpt (model x level)
+    alt OpenAI API key present
+        Eng->>API: rewrite (streaming, plain text)
+        API-->>Eng: optimized prompt text
+    else no key
+        Eng->>Eng: localOptimizer template fallback
+    end
+    Eng->>Eng: strip artifacts; score locally via rubric.ts
+    Eng-->>Main: plain optimized prompt (overlay), score (Studio)
+    U->>Main: choose Apply (or Copy)
+    Main->>PS: inject optimized text (ValuePattern / paste)
+    PS->>App: replaces text in box
+    Main->>Main: persist to local JSON store (history + LRU cache)
 ```
 
 ### Edge cases handled in the flow
@@ -260,154 +265,182 @@ sequenceDiagram
 
 ## 5. Technical Architecture
 
-### Framework decision: Tauri 2.0 (Rust + WebView2)
+> **As-built (v0.1).** The shipping app is a **single-process Windows Electron app with no
+> cloud backend.** Optimization, scoring, guides, and storage all run locally on the client.
+> The cloud-backend / Tauri design below the original v1.0 vision is retained in §11 (Scaling)
+> as a future direction, not current reality.
 
-Chosen over Electron for this product specifically:
+### Framework: Electron + Vite + React/TypeScript
 
-- **Bundle size & footprint:** ~8MB shell vs Electron's 150MB+ for Chromium
-  ([I Built a Local Voice-to-Text App with Tauri 2.0](https://dev.to/auratech/i-built-a-local-voice-to-text-app-with-rust-tauri-20-whispercpp-and-llamacpp-heres-how-32h5)).
-  A resident tray utility must be light.
-- **Native OS integration:** Tauri 2.0 plugins for global hotkeys, clipboard, system tray,
-  notifications are first-class and clean
-  ([I Built a Local Voice-to-Text App with Tauri 2.0](https://dev.to/auratech/i-built-a-local-voice-to-text-app-with-rust-tauri-20-whispercpp-and-llamacpp-heres-how-32h5),
-  [Gets the user selected text? · tauri-apps Discussion #5624](https://github.com/tauri-apps/tauri/discussions/5624)).
-- **Security model:** allowlist-based IPC — the webview can only invoke explicitly permitted
-  Rust commands ([I Built a Local Voice-to-Text App with Tauri 2.0](https://dev.to/auratech/i-built-a-local-voice-to-text-app-with-rust-tauri-20-whispercpp-and-llamacpp-heres-how-32h5)).
-  Critical for an app that handles user prompts and API keys.
-- **Native input injection:** `enigo` for keystroke simulation, `arboard` for clipboard
-  ([Gets the user selected text? · tauri-apps Discussion #5624](https://github.com/tauri-apps/tauri/discussions/5624)).
+The app is built on **Electron 32** with a **Vite + React 18 + TypeScript + Tailwind**
+renderer (SWC plugin). It is **Windows-only**. The codebase is organised into four areas:
 
-Frontend: **React + TypeScript + Tailwind + shadcn/ui** inside the WebView2 surface — modern,
-fast to iterate, and good enough for a utility UI (Tauri uses the OS webview, which is fine
-for a utility app though not pixel-identical cross-platform
-([I Built a Local Voice-to-Text App with Tauri 2.0](https://dev.to/auratech/i-built-a-local-voice-to-text-app-with-rust-tauri-20-whispercpp-and-llamacpp-heres-how-32h5))).
+- `src/main` — Electron main process (Node): window/overlay/tray lifecycle, global hotkey,
+  capture/inject orchestration, native Win32 calls, local storage, encrypted key store.
+- `src/renderer` — React UI for the overlay and the Studio (Studio is lazy-loaded as a
+  separate chunk).
+- `src/engine` — the optimization engine: prompt-packs, guide loader, rubric/scoring, diff,
+  provider call, local-fallback optimizer, orchestrator.
+- `src/shared` — types and IPC channel names shared across processes; capture/terminal
+  resolution helpers.
+- `src/preload` — the contextIsolated bridge exposing a small, explicit IPC surface to the
+  renderer.
 
-### Component diagram
+Electron (over the originally-planned Tauri) was chosen pragmatically: the capture/inject
+path depends on **Windows UI Automation** invoked from Node via PowerShell helper scripts and
+`koffi` FFI, and a zero-native-dependency JSON store avoids native-ABI rebuild pain.
+
+### Component diagram (as-built)
 
 ```mermaid
 flowchart TB
-    subgraph Client[Windows Client — Tauri 2.0]
-        UI["React UI: Overlay + Studio"]
-        Core[Rust Core]
-        HK[GlobalShortcut Plugin]
-        Clip[Clipboard via arboard]
-        Inj[Input Sim via enigo]
-        Tray[System Tray]
-        Vault["Secure Storage: OS Credential Manager"]
-        LocalDB[SQLite via sqlx]
-        Sync["Sync Engine: CRDT-ish last-write-wins"]
-        UI -- Tauri IPC allowlist --> Core
-        Core --> HK
-        Core --> Clip
-        Core --> Inj
-        Core --> Tray
-        Core --> Vault
-        Core --> LocalDB
-        Core --> Sync
+    subgraph Client[Windows Client — Electron]
+        UI["React UI: Overlay + Studio (Vite)"]
+        Preload["Preload bridge (contextIsolation)"]
+        Main["Main process (Node)"]
+        HK["globalShortcut (Ctrl+Shift+O)"]
+        Win32["win32.ts via koffi + PowerShell scripts"]
+        Tray["System Tray"]
+        Keys["keyStore: OS Credential Manager"]
+        Store["Local JSON store (userData)"]
+        Engine["Engine: packs + guideLoader + rubric + diff"]
+        UI -- IPC --> Preload
+        Preload -- ipcMain --> Main
+        Main --> HK
+        Main --> Win32
+        Main --> Tray
+        Main --> Keys
+        Main --> Store
+        Main --> Engine
     end
 
-    subgraph Backend[PromptForge Backend]
-        Gateway["API Gateway: REST + WS streaming"]
-        Engine[Optimization Engine Service]
-        Registry[Prompt-Pack Registry — versioned]
-        Research["AI Research Pipeline: doc watchers"]
-        Billing["Billing & Credits Service"]
-        Auth["Auth: OAuth + sessions"]
-        Eval["Eval Harness: quality regression"]
-        Gateway --> Engine
-        Engine --> Registry
-        Engine --> Billing
-        Registry --> Research
-        Research --> Eval
+    subgraph Files[Bundled data files]
+        Guides["prompting-guides/*.md"]
+        Packs["src/engine/packs.ts (metadata)"]
     end
 
-    subgraph Providers[LLM Providers]
-        Anthro[Anthropic]
-        OpenAI[OpenAI]
-        Google[Google]
-        Deep[DeepSeek]
-        xAI[xAI / Grok]
+    subgraph Ext[External]
+        OpenAI["OpenAI API (gpt-4.1-mini)"]
     end
 
-    Client <-->|HTTPS / WSS| Gateway
-    Engine --> Providers
+    Engine --> Guides
+    Engine --> Packs
+    Engine -->|HTTPS, only if key set| OpenAI
 ```
 
-### Client core responsibilities (Rust)
-- Register/unregister the global hotkey; surface conflicts.
-- On trigger: snapshot clipboard → simulate Ctrl+C → read clipboard → spawn overlay.
-- Hold model/level selection state; call backend with streaming.
-- Inject result via select-all + paste, or copy + toast fallback.
-- Securely store the user's auth token and (optional) BYOK provider keys in the Windows
-  Credential Manager (never in plaintext config).
-- Local SQLite cache of library, history, personas, and a mirror of prompt-packs for offline
-  use.
-- Sync engine: last-write-wins per record with vector clocks; offline-first.
+### Main-process responsibilities (`src/main`)
+- Register the global hotkey (`Ctrl+Shift+O`, reassignable) via Electron `globalShortcut`.
+- On trigger: `hotkeySnapshot()` → capture the focused field via UIA `TextPattern`
+  (PowerShell `win-hotkey-snapshot.ps1` / `win-capture.ps1`), with clipboard fallback;
+  poll the foreground window via `GetForegroundWindow` (`win32.ts`, koffi).
+- Detect terminal hosts (`terminalDetect.ts`) and switch to **copy-only** terminal mode.
+- Manage overlay window (frameless, transparent, draggable, position-persisted) and the
+  lazy Studio window; system tray with Settings/Quit.
+- Run optimization in-process via the engine; stream plain text to the overlay.
+- **Apply**: inject optimized text back via UIA `ValuePattern`/`TextPattern`/paste cascade
+  (`win-inject.ps1`); terminals route Apply to clipboard only.
+- Store the OpenAI API key encrypted in the **Windows Credential Manager** (`keyStore`);
+  never in plaintext config. Only the prompt text is sent to the rewrite API — UIA metadata
+  (`runtimeId`/`className`/`bounds`) stays local.
+- Persist settings, library, history, and an LRU optimization cache to a local JSON file in
+  `userData` (`storage.ts`).
 
-### Backend responsibilities
-- **Optimization Engine Service:** the heart. Given `(prompt, targetModel, level, persona,
-  context)`, it (a) runs **Analysis** to produce the quality score and weakness list, (b)
-  assembles the **meta-prompt** from the matching prompt-pack, (c) calls the appropriate
-  provider LLM to do the rewrite, (d) returns optimized prompt + score + diff. Streaming via
-  WebSocket.
-- **Prompt-Pack Registry:** versioned, model-specific packs (see "Engines as data" below).
-  Served to clients for local caching; hot-updatable without client releases.
-- **Provider Abstraction Layer:** one interface to Anthropic/OpenAI/Google/DeepSeek/xAI with
-  per-provider auth, retries, rate-limit handling, and cost accounting.
-- **Billing & Credits:** meters token spend per optimization, deducts credits, enforces free
-  tier caps. BYOK path bypasses managed billing (user's own key, their own cost).
-- **Auth:** email/OAuth (Google/GitHub) sessions; token refresh.
-- **AI Research Pipeline:** scheduled crawlers/watchers of official provider docs; diff vs
-  last known; draft new prompt-pack versions; queue for human review; on approval publish to
-  the Registry and bump the eval harness.
+### No backend (today)
+There is **no API gateway, auth service, billing, sync engine, Postgres, or Redis**. The
+original cloud design (versioned pack registry served over a CDN, managed credits, OAuth,
+CRDT sync, AI Research Pipeline) is **not implemented** and lives in §11/§12 as future scope.
+Everything the app needs ships inside the client bundle.
 
-### Engines as data, not code (the key architectural decision)
-Each "engine" is a **versioned prompt-pack**, not a compiled module:
+### One rewrite model for all targets (key as-built decision)
+The **target-model picker only selects which prompting methodology is applied** — it does
+**not** route to that provider. A **single rewrite model, OpenAI `gpt-4.1-mini`**
+(`REWRITE_CONFIG`, temperature fixed at `0.3`), performs every rewrite regardless of target.
+The decoupling is explicit in `rewrite.ts` (`rewriteProviderForTarget()` always returns
+OpenAI). Settings therefore expose a **single OpenAI API key**. If no key is present, the
+engine falls back to `localOptimizer.ts` (per-model templates, no network call).
 
-- `system_prompt` — the meta-instructions that turn the optimizer LLM into an expert for that
-  target model (e.g., "You are an Anthropic prompt-engineering specialist applying Claude
-  Opus 4.8 best practices: XML-tagged structure, explicit role, step-by-step thinking,
-  examples...").
-- `analysis_rubric` — the weights and checks for the 1–100 quality score.
-- `exemplars` — few-shot before/after pairs curated from official docs and benchmarks.
-- `output_schema` — structured JSON the optimizer must return (optimized_prompt, score,
-  diff, persona_suggestion, notes).
-- `level_overrides` — per optimization level (1–4): depth, token budget, whether to add
-  examples/persona/chain-of-thought, latency/cost targets.
+### Engines as data: prompting guides + packs (as-built)
+"Model specificity" is delivered by **two local data sources**, not a cloud registry:
 
-Benefits: new models added by authoring a pack (no client release); auto-updating frameworks
-is just publishing pack versions; the plugin architecture exposes the same pack format to
-third parties; A/B testing packs is trivial. Cost: prompt-pack quality is the product — it
-needs an eval harness and curation discipline (see §11, §12).
+- **`prompting-guides/*.md`** — the source of truth per target model: `opus4.8.md`,
+  `gpt5.5.md`, `gemini.3.pro.md`, `deepseek.V3.md`, `grok4.md`, `composer2.5.md`.
+  `guideLoader.ts` loads the file for the chosen model and extracts a **level-sized excerpt**
+  (char budget per level: L1 3000 → L4 12000), preferring sections whose headings match
+  level-relevant keywords.
+- **`src/engine/packs.ts`** — per-model metadata: `system_prompt`, a UI-facing `methodology`
+  bullet list, the scoring `rubric`, `exemplars`, an output-schema hint, and
+  `level_overrides` (token budgets / depth notes).
 
-### Optimization Levels (1–4)
-- **L1 Light Enhancement** — quick cleanup: clarity, structure, remove ambiguity. Fast,
-  cheap, deterministic-feeling. ~1 LLM call, small token budget.
-- **L2 Professional Enhancement** — add role/persona, explicit context, constraints, output
-  format. The default. ~1–2 calls, medium budget.
-- **L3 Expert Prompt Engineer** — full framework: persona, context, task decomposition,
-  examples, chain-of-thought cues, negative constraints, output schema, verification steps.
-  ~2 calls (analyze then rewrite), larger budget.
-- **L4 Maximum Capability Mode** — L3 plus multi-shot self-critique: optimize → critique →
-  refine, possibly model-specific advanced techniques (e.g., Anthropic's extended thinking
-  priming, Google's "show your work" patterns). Highest quality, highest latency/cost.
+Updating a model's methodology is editing a markdown file — no client release needed for
+guide-text changes, and PowerShell capture/inject scripts are likewise read fresh at runtime.
+Adding a new target model means adding a guide file plus a `ModelId` entry. (Note: the model
+list and ids in `types.ts` — e.g. `gpt-5` mapped to the `gpt5.5.md` guide — are an internal
+inconsistency worth tidying.)
 
-### Performance targets
-- Overlay appears **<150ms** after hotkey (local).
-- End-to-end optimization **<2s for L1–L2**, **<5s for L3**, **<12s for L4**, with streaming
-  so the user sees progress.
-- Identical-input caching (hash of prompt+model+level+persona) to dedup repeat optimizations.
-- Prompt-packs cached locally so the overlay works offline for cached models.
+### Optimization Levels (1–4) — guide-structure adherence scale
+Levels here are **not** "number of LLM calls" or a self-critique depth dial. They set **how
+strictly the model-specific guide structure is applied**, labelled **Cool / Warm / Hot / Max**
+(`LEVEL_LABELS`), via `getLevelRewriteInstruction()`:
+
+- **L1 Cool** — minimal rewrite: fix typos/ambiguity, keep the user's sentences and order,
+  lightest guide formatting only.
+- **L2 Warm** — light model-native structure (e.g. XML tags for Claude, markdown headers for
+  GPT); preserve all content, reorganise slightly. **Default.**
+- **L3 Hot** — full guide-compliant structure (context, task, constraints, output format),
+  bracketed placeholders only where the user left gaps.
+- **L4 Max** — complete guide methodology including examples, verification/success criteria,
+  and advanced patterns from the guide.
+
+Every level uses the same single rewrite call at the same fixed temperature; the level changes
+the **guide excerpt size and the rewrite instruction intensity**, not the model or the call
+count. The **measured** guide-structure adherence of the result is computed locally by
+`adherenceLevel()` in `rubric.ts` from the structure subscores.
+
+### Output & scoring (as-built)
+- The **overlay shows plain refined prompt text only** — no JSON, no score ring, no rubric
+  chips. Artifacts from the LLM are stripped by `stripResponseArtifacts()` (`cleanRewrite.ts`).
+- The **1–100 score and per-dimension subscores are computed locally** in `rubric.ts`
+  (baseline vs optimized); the diff is built locally in `diff.ts`. Score and diff surface in
+  the **Studio**, not the overlay.
+
+### Performance & efficiency targets (as-built)
+- Overlay reveal is tuned for an "instant feel" (~50–150ms pre-reveal acceptable); a warmup
+  (`ps-warmup.ps1`, `primeOverlayBuffer()`) reduces first-hotkey PowerShell/UIA cold start.
+- Streaming so the user sees the rewrite appear progressively.
+- **Identical-input caching**: hash of `(model|level|persona|prompt)` → slim LRU cache
+  (cap 100) in the local JSON store; the diff is rebuilt on read.
+- Memory hygiene: `spellcheck: false`, overlay `backgroundThrottling: false`, Studio
+  throttled and nulled on close.
 
 ---
 
 ## 6. Database Schema
 
-Local **SQLite** (client, via `sqlx`) and cloud **PostgreSQL** (backend). Shared entities
-sync between them; the cloud is the system of record for packs, billing, and accounts; the
-client is the system of record for transient local state.
+> **As-built (v0.1).** There is **no SQL database** — neither client SQLite nor cloud
+> Postgres. All persistence is a **single local JSON document** plus the OS Credential
+> Manager for the API key. The relational schema below is retained as the **future
+> cloud/sync data model** (needed once accounts, billing, and multi-device sync exist), not
+> as what ships today.
 
-### Entity-relationship diagram
+### As-built storage
+
+| Concern | Where | Detail |
+|---|---|---|
+| Settings, library, history, opt cache | `promptforge.store.json` in Electron `userData` | Single JSON file via `src/main/storage.ts` (`readFileSync`/`writeFileSync`). Chosen to avoid native-ABI rebuilds. |
+| OpenAI API key | Windows Credential Manager | Encrypted, via `keyStore`. Settings store only a presence flag. |
+| Prompting guides | `prompting-guides/*.md` (bundled) | Read-only at runtime by `guideLoader.ts`. |
+| Pack metadata | `src/engine/packs.ts` (bundled) | Compiled into the app, not a DB row. |
+
+The persisted JSON document (`StoreShape`) holds: `settings`, `library` (`LibraryItem[]`),
+`history` (`HistoryItem[]`, capped at 500), and `optCache` — a slim LRU map (cap **100**) keyed
+by `hash(model|level|persona|prompt)`. Cache entries omit the `diff` array (rebuilt on read via
+`buildDiff`) to keep the file small. Local types live in `src/shared/types.ts`
+(`AppSettings`, `LibraryItem`, `HistoryItem`, `OptimizeResult`, `SubScores`, `DiffSegment`).
+
+### Future cloud/sync data model (not implemented)
+
+The relational schema for the eventual managed backend (accounts, subscriptions, credits,
+versioned packs, BYOK, sync state):
 
 ```mermaid
 erDiagram
@@ -531,17 +564,13 @@ erDiagram
     }
 ```
 
-### Local-only (SQLite) tables
-- `app_settings` (hotkey, theme, default model/level, telemetry opt-in).
-- `clipboard_snapshots` (transient, for restore).
-- `cache_prompt_packs` (mirror of published packs for offline use).
-- `cache_optimizations` (input-hash → result, for dedup).
-
 ### Notes
-- BYOK keys are encrypted at rest (server) and/or stored only in the client OS Credential
-  Manager (preferred for consumer trust).
-- `OPTIMIZATIONS.diff` is a JSON patch so the Studio can render a clean highlight diff.
-- `PACK_VERSIONS` is immutable once published; clients pin a version and can roll forward.
+- Today the API key is stored only in the **client OS Credential Manager** (BYOK-style, no
+  server). The `API_KEYS_BYOK` table above applies only to the future managed backend.
+- In the future model, `OPTIMIZATIONS.diff` is a JSON patch for the Studio diff; today the
+  diff is computed on the fly by `diff.ts` and never persisted (cache rebuilds it on read).
+- In the future model, `PACK_VERSIONS` is immutable once published; today "pack versions" are
+  string constants in `packs.ts` shipped with the build.
 
 ---
 
@@ -606,37 +635,34 @@ A small, borderless, always-on-top window anchored near the caret/cursor:
 
 ## 8. Feature Roadmap
 
-### Phase 0 — Foundation (pre-MVP, weeks 0–6)
-- Tauri shell, global hotkey, clipboard capture/inject, tray, secure storage, local SQLite.
-- Backend skeleton: auth, Optimization Engine Service for **one** model (Claude) at **two**
-  levels, prompt-pack registry, streaming.
-- Eval harness v0 (the "is model-specific actually better?" proof — see §12).
+### Done — as-built v0.1 (local-only Electron app)
+- Electron shell; **global hotkey `Ctrl+Shift+O`**; tray (Settings, Quit); transparent,
+  draggable, position-persisted overlay; lazy-loaded Studio.
+- **Windows UIA capture/inject** via PowerShell + `koffi` (`TextPattern`/`ValuePattern`,
+  paste cascade); clipboard fallback; **terminal copy-only** mode with host detection.
+- **6 target-model guides** (Claude Opus 4.8, GPT-5/5.5, Gemini 3 Pro, DeepSeek V3, Grok 4,
+  Composer 2.5) as `prompting-guides/*.md` + `packs.ts` metadata.
+- **Levels 1–4 as a guide-structure adherence scale** (Cool/Warm/Hot/Max).
+- **Single OpenAI `gpt-4.1-mini` rewrite** for all targets; `localOptimizer` template
+  fallback when no key; plain-text streaming output.
+- Local JSON store: settings, library, history, LRU opt-cache; API key in OS Credential
+  Manager; local rubric scoring + diff (surfaced in Studio).
 
-### Phase 1 — MVP (weeks 6–14)
-- 4 models (Claude Opus 4.8, GPT-5, Gemini 3, DeepSeek or Grok), Levels 1–2.
-- Overlay with model picker, level, score, copy + inject.
-- Managed credits + free tier + Pro subscription + BYOK toggle.
-- Local library + history. Cloud sync for library.
-- See §10 for exact in/out.
+### Next — close the MVP gaps (§10)
+- Studio polish: full Original↔Optimized diff/comparison, analysis/rubric panel.
+- Onboarding flow + first-run "try it now"; telemetry opt-in.
+- Tidy model ids in `types.ts` (e.g. `gpt-5` vs the `gpt5.5.md` guide) and the §7 overlay
+  model list (drop the non-existent "Claude Sonnet", surface Composer 2.5).
+- Saved/reusable personas + persistent context memory applied automatically.
 
-### Phase 2 — v1 (months 4–7)
-- Levels 3–4 (expert + maximum, with self-critique).
-- Studio: full diff/comparison, analysis panel, auto-persona, context memory.
-- AI Research Mode v1 (doc watchers → human-reviewed pack updates).
-- Team plan: shared library, seats, roles.
-- 2 more models (full Grok + DeepSeek; Sonnet variant).
-
-### Phase 3 — v2 (months 8–14)
-- Plugin architecture: third-party prompt-packs, custom engines, MCP integration (mirroring
-  open-source competitors' MCP support ([8 Best Prompt Engineering Tools in 2026](https://orq.ai/blog/prompt-engineering-tools)).
-- Public API for developers.
-- macOS port (respond to demand; Windows-first remains).
-- Eval-driven pack A/B testing and automatic promotion of winning packs.
-
-### Phase 4 — Platform (months 15+)
-- Marketplace for community prompt-packs and personas.
-- Enterprise: SSO, audit logs, on-prem engine option, data residency.
-- Optional local inference for L1 (privacy tier).
+### Later — vision items (require a backend; not started)
+- Accounts/auth, managed credits + free tier + Pro/Team, cloud sync of the library.
+- AI Research Mode (doc watchers → human-reviewed guide/pack updates) and an eval harness.
+- Plugin architecture / third-party packs, MCP integration
+  ([8 Best Prompt Engineering Tools in 2026](https://orq.ai/blog/prompt-engineering-tools)),
+  public API, marketplace, enterprise (SSO, audit logs, data residency).
+- Per-provider rewrite routing (use each target's own LLM) instead of one rewrite model.
+- macOS port (Windows-first remains); optional local inference for a privacy tier.
 
 ---
 
@@ -811,39 +837,43 @@ a first-class system:
 
 ### Milestone sequence
 
-- **M0 (weeks 0–2):** Repo, CI, Tauri shell, global hotkey + clipboard capture/inject spike,
-  secure storage. Prove the hardest technical unknown first (system-wide capture).
-- **M1 (weeks 2–6):** Backend skeleton; Optimization Engine for Claude at L1–L2; prompt-pack
-  registry; streaming; auth. Eval harness v0 with a 30-prompt benchmark for Claude.
-- **M2 (weeks 6–10):** Add GPT-5 and Gemini 3 packs; overlay UI (model picker, level, score,
-  copy/inject); managed credits + free tier + Pro + BYOK; local library.
-- **M3 (weeks 10–14):** Add 4th model (DeepSeek or Grok); cloud sync of library; onboarding;
-  PromptPerfect migration import; telemetry; beta to waitlist.
-- **M4 (weeks 14–20):** Hardening, p95 latency work, security review, Windows signing/MSIX
-  packaging, auto-update. Public launch timed near the Sept 2026 shutdown window
+**Done (as-built v0.1):**
+- **M0 — Capture spike (the riskiest unknown), done first.** Electron shell, global hotkey,
+  and Windows UIA capture/inject via PowerShell + `koffi`, with clipboard fallback and
+  terminal copy-only mode. Foreground-window polling, warmup to kill first-hotkey latency.
+- **M1 — Engine, local.** In-process optimization engine: 6 model guides as files, level-based
+  excerpting, single OpenAI `gpt-4.1-mini` rewrite + `localOptimizer` fallback, plain-text
+  streaming, local rubric scoring + diff, LRU cache.
+- **M2 — Surfaces.** Overlay (model picker, Cool/Warm/Hot/Max level slider, Refine, Apply/Copy,
+  Discard; draggable, position-persisted) and lazy Studio. Settings with a single OpenAI key
+  stored in the OS Credential Manager. Local library + history.
+
+**Remaining to a shippable MVP:**
+- **M3 — Studio + onboarding.** Full diff/comparison + analysis panel in Studio; first-run
+  onboarding and "try it now"; telemetry opt-in; tidy model ids and the overlay model list;
+  Windows signing + NSIS packaging + auto-update; p95 latency + security pass.
+
+**Vision (needs a backend, not started):**
+- **M4+ — Managed tier.** Accounts/auth, managed credits + free tier + Pro/Team, cloud sync,
+  PromptPerfect migration import, timed near the Sept 2026 shutdown window
   ([PromptPerfect Alternative — Migrate Before September 2026](https://www.promptai360.com/promptperfect-alternative)).
-- **M5 (months 5–7):** v1 — Levels 3–4, Studio diff view, auto-persona + memory, AI Research
-  Mode v1, Team plan.
-- **M6 (months 8–14):** v2 — plugins/MCP, public API, macOS port, eval-driven A/B pack
-  promotion.
-- **M7 (months 15+):** Platform — marketplace, enterprise.
+- **M5+ — Quality & platform.** AI Research Mode + eval harness, per-provider rewrite routing,
+  plugins/MCP, public API, marketplace, enterprise, macOS port.
 
-### Build principles
-- Prove the riskiest unknown (system-wide capture) in M0, not M4.
-- Prove the core claim (model-specific lift) with the eval harness in M1, before scaling
-  packs.
-- Prompt-packs-as-data from day one — never hardcode an engine in the client.
-- Ship the overlay first, the Studio second; the overlay is the wedge.
-- BYOK and managed billing both ship in MVP so we capture both consumer and power-user
-  segments at launch.
+### Build principles (as-built)
+- Prove the riskiest unknown (system-wide Windows capture) first — done in M0.
+- Guides-as-files, packs-as-data — never hardcode a model's methodology in UI code; guide and
+  PowerShell scripts are read fresh at runtime (no rebuild for text edits).
+- Ship the overlay first (it is the wedge); Studio second.
+- Local-first and key-optional: the app degrades to `localOptimizer` with no network/API key.
+- Keep prompt content the only thing sent to the rewrite API; UIA metadata stays local.
 
-### Team & effort (to MVP, ~14 weeks)
-- 1 PM/founder (vision, packs, eval curation, GTM).
-- 1 Rust/Tauri engineer (client core, capture, inject, secure storage).
-- 1 backend engineer (engine service, registry, billing, sync).
-- 1 frontend/design (overlay + Studio UX).
-- 1 prompt-engineering/eval contractor (pack authoring, benchmark, rubric).
-- Stretch: 1 part-time DevOps/security for signing, auto-update, infra.
+### Reality vs. original plan
+- **Stack:** Electron (not Tauri/Rust); local JSON store (not SQLite/`sqlx`).
+- **Backend:** none yet (no auth/billing/sync/registry); the engine runs in the client.
+- **Rewrite:** one OpenAI model for all targets (not per-provider LLM routing).
+- **Levels:** a guide-adherence scale (Cool/Warm/Hot/Max), not a call-count/self-critique dial.
+- **Eval harness / AI Research Mode:** not yet built — still the key open risk in §12.
 
 ---
 

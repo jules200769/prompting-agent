@@ -194,8 +194,10 @@ export function clearHistory(): void {
 }
 
 // ---------- Opt cache ----------
+import { REWRITE_PIPELINE_VERSION } from "../engine/guideLoader";
+
 export function cacheHash(req: { prompt: string; model: string; level: number; persona?: string }): string {
-  return `${req.model}|${req.level}|${req.persona ?? ""}|${req.prompt.trim().toLowerCase()}`;
+  return `v${REWRITE_PIPELINE_VERSION}|${req.model}|${req.level}|${req.persona ?? ""}|${req.prompt.trim().toLowerCase()}`;
 }
 
 export function hydrateCacheResult(cached: CachedOptimizeEntry, originalPrompt: string): OptimizeResult {

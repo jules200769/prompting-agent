@@ -28,7 +28,7 @@ function OverlayPreview() {
         }}
       />
       <div className="absolute left-1/2 top-4 -translate-x-1/2 z-20 rounded-full bg-black/40 px-3 py-1 text-xs font-medium text-white/70 backdrop-blur">
-        Overlay preview (browser mock — not Electron)
+        Overlay preview (browser — optimize via Electron dev bridge)
       </div>
       <div className="relative z-10 h-full w-full">
         <Overlay />

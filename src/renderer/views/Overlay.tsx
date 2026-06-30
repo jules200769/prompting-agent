@@ -9,6 +9,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { api } from "../api";
+import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
 import type { CaptureMode, ModelId, OptLevel } from "../../shared/types";
 import { MODELS, LEVEL_LABELS } from "../../shared/types";
 
@@ -244,8 +245,16 @@ export function Overlay() {
   const [level, setLevel] = useState<OptLevel>(2);
   const [prompt, setPrompt] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
-  const [streamed, setStreamed] = useState("");
   const [outputText, setOutputText] = useState("");
+  const {
+    displayed,
+    isRevealing,
+    reset: resetTypewriter,
+    appendTarget,
+    setTarget,
+    flush,
+    waitUntilRevealed,
+  } = useTypewriterReveal();
   const [hasGenerated, setHasGenerated] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [shellVisible, setShellVisible] = useState(false);
@@ -258,6 +267,7 @@ export function Overlay() {
     terminalContext?: boolean;
   } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const outputRef = useRef<HTMLTextAreaElement>(null);
   const keyStateRef = useRef({ mode, phase, captureFailed: false });
   const actionsRef = useRef<{ runOptimize: () => void; onApply: () => void }>({
     runOptimize: () => {},
@@ -281,7 +291,7 @@ export function Overlay() {
       setMode("field");
       setPrompt("");
       setPhase("idle");
-      setStreamed("");
+      resetTypewriter();
       setOutputText("");
       setHasGenerated(false);
       setMenuOpen(false);
@@ -316,7 +326,7 @@ export function Overlay() {
         setTerminalContext(Boolean(detail.terminalContext));
         setPrompt(detail.text);
         setPhase("idle");
-        setStreamed("");
+        resetTypewriter();
         setOutputText("");
         setHasGenerated(false);
         setMenuOpen(false);
@@ -332,7 +342,7 @@ export function Overlay() {
       setTerminalContext(false);
       setPrompt("");
       setPhase("capturing");
-      setStreamed("");
+      resetTypewriter();
       setOutputText("");
       setHasGenerated(false);
       setMenuOpen(false);
@@ -364,23 +374,26 @@ export function Overlay() {
   async function runOptimize() {
     if (!prompt.trim()) return;
     setApplyNotice(null);
+    resetTypewriter();
     setPhase("optimizing");
-    setStreamed("");
     setOutputText("");
     try {
-      const res = await api.optimize({ prompt, model, level }, (chunk) => {
-        setStreamed((s) => s + chunk);
-      });
-      setStreamed(res.optimizedPrompt);
+      const res = await api.optimize(
+        { prompt, model, level, skipCache: hasGenerated },
+        appendTarget,
+      );
+      setTarget(res.optimizedPrompt);
+      await waitUntilRevealed();
       setOutputText(res.optimizedPrompt);
       setHasGenerated(true);
       setPhase("done");
     } catch (e: any) {
-      setPhase("error");
       const msg = `Error: ${e?.message ?? e}`;
-      setStreamed(msg);
+      setTarget(msg);
+      flush();
       setOutputText(msg);
       setHasGenerated(true);
+      setPhase("error");
     }
   }
 
@@ -424,12 +437,12 @@ export function Overlay() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const busy = phase === "optimizing";
+  const busy = phase === "optimizing" || isRevealing;
   const capturing = phase === "capturing";
   const captureFailed = mode === "empty";
   const canRefine = !captureFailed && !capturing && !!prompt.trim() && !busy;
   const showOutput = busy || phase === "done" || phase === "error";
-  const outputValue = busy ? streamed : outputText;
+  const outputValue = busy ? displayed : outputText;
   const canApplyOrCopy = !!outputText.trim() && phase === "done";
   const applyLabel = mode === "terminal" ? "Copy" : "Apply";
   const modelLabel = MODELS.find((m) => m.id === model)?.label ?? model;
@@ -440,6 +453,11 @@ export function Overlay() {
     : busy
       ? "Refining…"
       : "Output will appear here";
+
+  useEffect(() => {
+    const el = outputRef.current;
+    if (el && busy) el.scrollTop = el.scrollHeight;
+  }, [displayed, busy]);
 
   return (
     <div className="overlay-font w-full h-full flex items-center justify-center px-12">
@@ -512,6 +530,7 @@ export function Overlay() {
                 }`}
               >
                 <textarea
+                  ref={outputRef}
                   value={showOutput ? outputValue : ""}
                   onChange={(e) => setOutputText(e.target.value)}
                   readOnly={busy || capturing || phase === "error"}
@@ -519,6 +538,14 @@ export function Overlay() {
                   placeholder={outputPlaceholder}
                   className="w-full h-full bg-transparent border-0 px-3.5 py-3 pr-2 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none scroll-thin"
                 />
+                {busy && displayed.length > 0 && (
+                  <span
+                    className="pointer-events-none absolute bottom-3 right-3 text-[15px] text-white/70 animate-pulse"
+                    aria-hidden
+                  >
+                    ▋
+                  </span>
+                )}
               </div>
             </div>
 
