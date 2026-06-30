@@ -130,6 +130,16 @@ if (-not [string]::IsNullOrEmpty($MetaPath) -and (Test-Path -LiteralPath $MetaPa
   $meta = Get-Content -LiteralPath $MetaPath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
+# Chrome/Edge/Brave and all Electron apps (Cursor, ChatGPT desktop) share the
+# "Chrome_WidgetWin" top-level class. Chromium web fields ignore UIA
+# ValuePattern.SetValue, so treat them all as rich editors and use the single
+# clipboard-paste path Cursor already uses — no ValuePattern/Unicode cascade.
+$script:IsChromiumHost = $false
+try {
+  $topCls = [System.Windows.Automation.AutomationElement]::FromHandle($top).Current.ClassName
+  if ($topCls -match "Chrome_WidgetWin") { $script:IsChromiumHost = $true }
+} catch {}
+
 function Get-ElementTextValue($el) {
   if ($null -eq $el) { return $null }
   try {
@@ -197,6 +207,7 @@ function Find-ElementByRuntimeId($root, [int[]]$targetId, [int]$maxNodes) {
 }
 
 function Test-IsRichTextEditor($el) {
+  if ($script:IsChromiumHost) { return $true }
   if ($null -eq $el) { return $false }
   try {
     $cls = $el.Current.ClassName

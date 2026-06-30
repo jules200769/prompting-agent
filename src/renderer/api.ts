@@ -23,6 +23,7 @@ type OverlayShowPayload = {
   text: string;
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
+  terminalContext?: boolean;
 };
 
 /**

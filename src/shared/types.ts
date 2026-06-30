@@ -45,7 +45,7 @@ export const LEVEL_LABELS: Record<OptLevel, string> = {
   4: "Max",
 };
 
-export type CaptureMode = "field" | "empty";
+export type CaptureMode = "field" | "empty" | "terminal";
 
 export type InjectResult = "injected" | "copied";
 

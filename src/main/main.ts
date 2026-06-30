@@ -37,7 +37,12 @@ const isDev = !!process.env.VITE_DEV_SERVER_URL;
 let overlay: BrowserWindow | null = null;
 let studio: BrowserWindow | null = null;
 let tray: Tray | null = null;
-let pendingCapture: { text: string; mode: CaptureMode; snapshot: { text: string; hasText: boolean } } | null = null;
+let pendingCapture: {
+  text: string;
+  mode: CaptureMode;
+  snapshot: { text: string; hasText: boolean };
+  terminalContext?: boolean;
+} | null = null;
 let isOptimizing = false;
 let hotkeyInFlight = false;
 let overlayPreparedResolve: (() => void) | null = null;
@@ -147,6 +152,7 @@ async function deliverCaptureToOverlay(capture: {
   text: string;
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
+  terminalContext?: boolean;
 }): Promise<void> {
   if (!overlay) overlay = createOverlay();
   if (overlay.webContents.isLoading()) {
@@ -160,6 +166,7 @@ async function deliverCaptureToOverlay(capture: {
     text: capture.text,
     mode: capture.mode,
     snapshot: capture.snapshot,
+    terminalContext: capture.terminalContext ?? false,
   });
   await prepared;
   if (!overlay.isVisible()) {
@@ -340,6 +347,11 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.CAPTURE_INJECT, async (_evt, text: string, snapshot: { text: string; hasText: boolean }) => {
     const snap = snapshot || pendingCapture?.snapshot || { text: "", hasText: false };
+    if (pendingCapture?.mode === "terminal") {
+      await copyToClipboard(text, snap);
+      await hideOverlay();
+      return "copied" as const;
+    }
     // Hide overlay first so it does not steal focus; keep renderer state for clipboard fallback.
     await hideOverlayForInject();
     await sleep(250);

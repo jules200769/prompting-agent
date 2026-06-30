@@ -250,7 +250,13 @@ export function Overlay() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [shellVisible, setShellVisible] = useState(false);
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
-  const captureRef = useRef<{ text: string; mode: CaptureMode; snapshot: { text: string; hasText: boolean } } | null>(null);
+  const [terminalContext, setTerminalContext] = useState(false);
+  const captureRef = useRef<{
+    text: string;
+    mode: CaptureMode;
+    snapshot: { text: string; hasText: boolean };
+    terminalContext?: boolean;
+  } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const keyStateRef = useRef({ mode, phase, captureFailed: false });
   const actionsRef = useRef<{ runOptimize: () => void; onApply: () => void }>({
@@ -280,6 +286,7 @@ export function Overlay() {
       setHasGenerated(false);
       setMenuOpen(false);
       setApplyNotice(null);
+      setTerminalContext(false);
       setShellVisible(false);
     });
     ackOverlayPrepared();
@@ -296,14 +303,17 @@ export function Overlay() {
       text: string;
       mode: CaptureMode;
       snapshot: { text: string; hasText: boolean };
+      terminalContext?: boolean;
     }) => {
       flushSync(() => {
         captureRef.current = {
           text: detail.text,
           mode: detail.mode,
           snapshot: detail.snapshot ?? { text: "", hasText: false },
+          terminalContext: detail.terminalContext,
         };
         setMode(detail.mode);
+        setTerminalContext(Boolean(detail.terminalContext));
         setPrompt(detail.text);
         setPhase("idle");
         setStreamed("");
@@ -319,6 +329,7 @@ export function Overlay() {
     const onCapturePending = () => {
       captureRef.current = null;
       setMode("field");
+      setTerminalContext(false);
       setPrompt("");
       setPhase("capturing");
       setStreamed("");
@@ -376,6 +387,11 @@ export function Overlay() {
   async function onApply() {
     if (!outputText.trim() || phase !== "done") return;
     setApplyNotice(null);
+    if (mode === "terminal") {
+      await api.captureCopy(outputText);
+      setApplyNotice("Terminal: copied to clipboard");
+      return;
+    }
     const res = await api.captureInject(outputText, captureRef.current?.snapshot ?? { text: "", hasText: false });
     if (res === "copied") {
       setApplyNotice("Couldn't insert — copied to clipboard");
@@ -393,7 +409,7 @@ export function Overlay() {
     const onKey = (e: KeyboardEvent) => {
       const { mode: m, phase: p, captureFailed: failed } = keyStateRef.current;
       if (e.key === "Escape") api.hideOverlay();
-      if (m === "field" && ["1", "2", "3", "4"].includes(e.key) && !e.metaKey && !e.ctrlKey) {
+      if ((m === "field" || m === "terminal") && ["1", "2", "3", "4"].includes(e.key) && !e.metaKey && !e.ctrlKey) {
         setLevel(Number(e.key) as OptLevel);
       }
       if (e.key === "Enter" && !e.shiftKey && !failed && p !== "capturing") {
@@ -415,6 +431,7 @@ export function Overlay() {
   const showOutput = busy || phase === "done" || phase === "error";
   const outputValue = busy ? streamed : outputText;
   const canApplyOrCopy = !!outputText.trim() && phase === "done";
+  const applyLabel = mode === "terminal" ? "Copy" : "Apply";
   const modelLabel = MODELS.find((m) => m.id === model)?.label ?? model;
   const controlsDisabled = captureFailed || capturing || busy;
 
@@ -463,7 +480,9 @@ export function Overlay() {
         <div className="apple-glass relative rounded-[34px] w-full p-4 text-white">
         {captureFailed ? (
           <div className="apple-glass-panel rounded-[26px] p-4 text-sm text-warn">
-            Could not capture text. Make sure the cursor is in a text field.
+            {terminalContext
+              ? "Select text in the terminal first, then press the hotkey."
+              : "Could not capture text. Make sure the cursor is in a text field."}
           </div>
         ) : (
           <>
@@ -523,11 +542,13 @@ export function Overlay() {
                   Discard
                 </button>
                 <GlassPill onClick={onApply} disabled={!canApplyOrCopy}>
-                  Apply
+                  {applyLabel}
                 </GlassPill>
-                <GlassPill onClick={() => void onCopy()} disabled={!canApplyOrCopy}>
-                  Copy
-                </GlassPill>
+                {mode !== "terminal" && (
+                  <GlassPill onClick={() => void onCopy()} disabled={!canApplyOrCopy}>
+                    Copy
+                  </GlassPill>
+                )}
               </div>
             </div>
           </>

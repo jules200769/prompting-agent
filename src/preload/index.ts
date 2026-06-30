@@ -6,6 +6,7 @@ type OverlayShowPayload = {
   text: string;
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
+  terminalContext?: boolean;
 };
 
 const overlayShowCallbacks = new Set<(payload: OverlayShowPayload) => void>();
