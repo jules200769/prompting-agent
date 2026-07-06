@@ -52,6 +52,46 @@ CONSTRAINT FRAMING (Level 3+):
 - Reframe each "don't / do not X" user constraint as positive guidance where possible (e.g. "don't blame" → "use neutral, forward-looking language without assigning fault")
 `
       : "";
+  const gptOutcomeFirstRule =
+    params.model === "gpt-5" && params.level >= 2 && !params.terminalContext
+      ? `
+GPT-5.5 OUTCOME-FIRST (mandatory):
+- Shorter, outcome-oriented paste prompts — no legacy process stacks
+- Never add # Personality, # Collaboration, Role:, # Goal, or # Stop rules blocks to the refined prompt
+- Level 2–3: no phased workflows, success criteria, or examples unless Level 4 explicitly requires them
+`
+      : "";
+  const composerStructureRule =
+    params.model === "composer-2.5" && !params.terminalContext
+      ? `
+COMPOSER 2.5 (mandatory):
+- Level 2: Goal + Context + Input only — never Process, Constraints, Output format, Examples, or Success criteria
+- Level 3: Goal, Context, Constraints, Output format — no Examples or Success criteria
+- Level 4: all Level 3 blocks plus Examples and Success criteria
+- When the user says fix/implement/build: Goal must demand direct implementation, not "propose a plan and wait for approval" on simple tasks
+- Include React/TypeScript stack hints in Context when the user mentioned them; never invent file paths or component names
+`
+      : "";
+  const grokStructureRule =
+    params.model === "grok-4" && !params.terminalContext
+      ? `
+GROK 4 (mandatory):
+- Use GOAL / CONTEXT / OUTPUT FORMAT / QUALITY BAR (ALL CAPS labels) — never XML tags for grok-4
+- Do not invent X posts, URLs, or live search results unless the user explicitly requested real-time search
+- QUALITY BAR is required on Level 3 and Level 4
+- No model name or version padding in the refined prompt body
+`
+      : "";
+  const geminiStructureRule =
+    params.model === "gemini-3" && !params.terminalContext
+      ? `
+GEMINI 3 (mandatory):
+- Level 2: Persona (optional one line) + Task + Input only
+- Level 3+: block order is Context → Task → Output → Constraints (Constraints MUST be last)
+- Never use blanket "do not infer" / "do not guess" — use positive grounding instructions instead
+- Level 3: no Examples or Success criteria; those are Level 4 only
+`
+      : "";
 
   const terminalOutputRule = params.terminalContext
     ? `
@@ -78,7 +118,7 @@ ${guide}
 ${levelLine}
 
 ${structureBlock}
-${terminalOutputRule}${actionLanguageRule}${constraintFramingRule}
+${terminalOutputRule}${actionLanguageRule}${constraintFramingRule}${gptOutcomeFirstRule}${composerStructureRule}${grokStructureRule}${geminiStructureRule}
 ${personaLine}${personaLine ? "\n" : ""}${contextLine}
 
 OUTPUT RULES (strict):

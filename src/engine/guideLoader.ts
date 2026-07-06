@@ -6,7 +6,7 @@ import type { ModelId, OptLevel } from "../shared/types";
 import { LEVEL_LABELS } from "../shared/types";
 
 /** Bump when meta-prompt / structure contract changes — invalidates persisted opt cache. */
-export const REWRITE_PIPELINE_VERSION = 2;
+export const REWRITE_PIPELINE_VERSION = 7;
 
 const GUIDE_FILES: Record<ModelId, string> = {
   "claude-opus-4.8": "opus4.8.md",
@@ -144,7 +144,7 @@ export function getLevelRewriteInstruction(level: OptLevel): string {
   return lines[level];
 }
 
-type StructureFormat = "xml" | "markdown" | "gemini" | "composer" | "deepseek";
+type StructureFormat = "xml" | "markdown" | "gemini" | "composer" | "deepseek" | "grok";
 
 function structureFormat(model: ModelId): StructureFormat {
   switch (model) {
@@ -156,6 +156,8 @@ function structureFormat(model: ModelId): StructureFormat {
       return "composer";
     case "deepseek-v3":
       return "deepseek";
+    case "grok-4":
+      return "grok";
     default:
       return "xml";
   }
@@ -200,60 +202,109 @@ export function getLevelStructureContract(model: ModelId, level: OptLevel): stri
   if (fmt === "markdown") {
     if (level === 2) {
       return `STRUCTURE CONTRACT (mandatory):
-- Use markdown headers: ## Instructions and ## Input
+- Use exactly two markdown headers: ## Instructions and ## Input
 - ## Instructions: short role + imperative task summary — do NOT paste the full user prompt here
 - ## Input: user prompt verbatim (light typo fixes only)
-- Do NOT duplicate content between sections`;
+- Do NOT duplicate content between sections
+- NO # Personality, # Collaboration, Role:, # Goal, or # Stop rules blocks — keep outcome-first and concise`;
     }
     if (level === 3) {
       return `STRUCTURE CONTRACT (mandatory):
-- Use ## Context, ## Task, ## Constraints, ## Output format (optional ## Instructions for role)
-- Apply to ALL task types; specify exact deliverable shape in Output format
-- Use [detail TBD] placeholders for gaps; reframe negatives as positive guidance`;
+- Use ONLY these headers: ## Context, ## Task, ## Constraints, ## Output format (optional brief ## Instructions for role)
+- Apply to ALL task types; specify exact deliverable shape in ## Output format
+- Use [detail TBD] placeholders for gaps; reframe negatives as positive guidance
+- Do NOT add ## Examples, ## Success criteria, # Goal, # Stop rules, or personality/collaboration blocks at Level 3`;
     }
     return `STRUCTURE CONTRACT (mandatory):
 - Level 4 is Level 3 expanded — keep every Level 3 header; do not collapse into Instructions alone
-- REQUIRED: ## Context, ## Task, ## Constraints, ## Output format, ## Examples, ## Success criteria
+- REQUIRED headers (all mandatory, use ## only): ## Context, ## Task, ## Constraints, ## Output format, ## Examples, ## Success criteria
+- Do NOT add # Personality, # Collaboration, Role:, # Goal, or # Stop rules — GPT-5.5 paste prompts stay outcome-first, not process-heavy
+- ## Examples: one brief pattern (tone/format/answer shape) — no invented facts
+- ## Success criteria: 2–3 concrete, checkable items
 - End with a brief verification line before finishing`;
   }
 
   if (fmt === "gemini") {
     if (level === 2) {
       return `STRUCTURE CONTRACT (mandatory):
-- Persona: one line. Task: imperative summary. Input: user prompt verbatim on its own line — no duplication`;
+- Persona: optional one short line. Task: imperative summary. Input: user prompt verbatim on its own line — no duplication
+- Do NOT add Context, Constraints, Output, Examples, or Success criteria at Level 2`;
     }
     if (level === 3) {
       return `STRUCTURE CONTRACT (mandatory):
-- Separate Context, Task, Constraints, and Output blocks for all task types`;
+- Use labeled blocks: Context, Task, Output, Constraints (for ALL task types)
+- Constraints MUST be the final block — place negative and formatting limits there per Gemini guide
+- Do NOT add Examples or Success criteria at Level 3
+- Do NOT use blanket negatives like "do not infer" or "do not guess"`;
     }
     return `STRUCTURE CONTRACT (mandatory):
-- Level 4 expands Level 3 — keep Context, Task, Constraints, and Output blocks; add Examples and Success criteria (2–3 checkable items)`;
+- Level 4 expands Level 3 — keep Context, Task, Output, and Constraints blocks (Constraints still last among core blocks)
+- Add Examples and Success criteria (2–3 checkable items) after Constraints
+- End with a brief verification line`;
   }
 
   if (fmt === "composer") {
     if (level === 2) {
       return `STRUCTURE CONTRACT (mandatory):
-- Goal: imperative summary. Context: role only. Input: user prompt verbatim — no duplication`;
+- Use exactly three blocks with labels on their own lines: Goal, Context, Input
+- Goal: one imperative line — do NOT paste the full user prompt here
+- Context: optional one-line role or audience only
+- Input: user prompt verbatim (light typo fixes only); source of truth — no duplication
+- Do NOT add Process, Constraints, Output format, Examples, or Success criteria at Level 2`;
     }
     if (level === 3) {
       return `STRUCTURE CONTRACT (mandatory):
-- Goal, Context, Constraints, and Output format sections for all task types`;
+- Use Goal, Context, Constraints, and Output format blocks (labels on their own lines) for ALL task types
+- Goal: use implement/fix/write imperatives when the user asked to fix, build, or write — not "suggest" or "propose"
+- Context: include stack or audience hints the user gave; do not invent file paths, folders, or repo details
+- Do NOT add Examples or Success criteria at Level 3 — those are Level 4 only
+- Process block optional at Level 3 for genuinely multi-step work only — never "wait for approval" on straightforward fix requests`;
     }
     return `STRUCTURE CONTRACT (mandatory):
-- Level 4 expands Level 3 — keep Goal, Context, Constraints, and Output format; add Examples and Success criteria (2–3 checkable items)`;
+- Level 4 expands Level 3 — keep Goal, Context, Constraints, and Output format blocks
+- Add Examples (brief diff pattern, email excerpt, or checklist) and Success criteria (2–3 checkable items)
+- End with a brief verification line`;
+  }
+
+  if (fmt === "grok") {
+    if (level === 2) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Use GOAL: (one imperative sentence) and INPUT: (user prompt verbatim, light typo fixes only)
+- ALL CAPS section labels per Grok guide — no XML tags (<context>, <task>, etc.)
+- Do NOT add CONTEXT, OUTPUT FORMAT, or QUALITY BAR at Level 2`;
+    }
+    if (level === 3) {
+      return `STRUCTURE CONTRACT (mandatory):
+- Use all four Grok blocks with ALL CAPS labels: GOAL, CONTEXT, OUTPUT FORMAT, QUALITY BAR
+- CONTEXT: bullet list (audience, inputs, constraints from user facts only)
+- QUALITY BAR: Include / Avoid / If uncertain sub-bullets per guide
+- Do NOT use XML tags; do NOT invent X posts, web citations, or live search unless the user asked
+- Do NOT add model name or version padding in the prompt body`;
+    }
+    return `STRUCTURE CONTRACT (mandatory):
+- Level 4 expands Level 3 — keep GOAL, CONTEXT, OUTPUT FORMAT, and QUALITY BAR blocks
+- Add EXAMPLES (brief tone/format pattern) and SUCCESS CRITERIA (2–3 measurable items) as additional ALL CAPS sections
+- Do NOT mix XML tags with Grok blocks
+- End with a brief verification line`;
   }
 
   // deepseek
   if (level === 2) {
     return `STRUCTURE CONTRACT (mandatory):
-- Role + Task summary, then Input with user prompt verbatim — no duplication`;
+- Role: one short line. Task: imperative summary on its own line
+- Input: user prompt verbatim (light typo fixes only) — no duplication
+- Do NOT add Context, Constraints, Output format, Examples, or Success criteria at Level 2`;
   }
   if (level === 3) {
     return `STRUCTURE CONTRACT (mandatory):
-- Context, Task, Constraints, and Output format for all task types`;
+- Use labeled blocks: Task, Context, Constraints, Output format (for ALL task types)
+- Task: strong action verbs (implement, fix, write) — not suggest or recommend
+- Do NOT add Examples or Success criteria at Level 3`;
   }
   return `STRUCTURE CONTRACT (mandatory):
-- Level 4 expands Level 3 — keep Context, Task, Constraints, and Output format; add Examples and Success criteria (2–3 checkable items)`;
+- Level 4 expands Level 3 — keep Task, Context, Constraints, and Output format blocks
+- Add Examples and Success criteria (2–3 checkable items)
+- End with a brief verification line`;
 }
 
 /** Clear cache (for tests). */

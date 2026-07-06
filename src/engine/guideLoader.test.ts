@@ -58,6 +58,70 @@ describe("guideLoader", () => {
     expect(max).toContain("<output_format>");
   });
 
+  it("GPT-5 markdown contracts forbid personality blocks and enforce level scale", () => {
+    const warm = getLevelStructureContract("gpt-5", 2);
+    const hot = getLevelStructureContract("gpt-5", 3);
+    const max = getLevelStructureContract("gpt-5", 4);
+
+    expect(warm).toContain("## Instructions");
+    expect(warm.toLowerCase()).toContain("personality");
+    expect(hot).toContain("## Output format");
+    expect(hot.toLowerCase()).toContain("do not add ## examples");
+    expect(max).toContain("## Examples");
+    expect(max).toContain("## Success criteria");
+    expect(max.toLowerCase()).toContain("do not add # personality");
+  });
+
+  it("Composer contracts enforce level differentiation", () => {
+    const warm = getLevelStructureContract("composer-2.5", 2);
+    const hot = getLevelStructureContract("composer-2.5", 3);
+    const max = getLevelStructureContract("composer-2.5", 4);
+
+    expect(warm.toLowerCase()).toContain("goal");
+    expect(warm.toLowerCase()).toContain("input");
+    expect(warm.toLowerCase()).toContain("do not add process");
+    expect(hot.toLowerCase()).toContain("output format");
+    expect(hot.toLowerCase()).toContain("do not add examples");
+    expect(max.toLowerCase()).toContain("examples");
+    expect(max.toLowerCase()).toContain("success criteria");
+  });
+
+  it("DeepSeek contracts enforce level differentiation", () => {
+    const warm = getLevelStructureContract("deepseek-v3", 2);
+    const hot = getLevelStructureContract("deepseek-v3", 3);
+    const max = getLevelStructureContract("deepseek-v3", 4);
+
+    expect(warm.toLowerCase()).toContain("role:");
+    expect(warm.toLowerCase()).toContain("input:");
+    expect(warm.toLowerCase()).toContain("do not add context");
+    expect(hot.toLowerCase()).toContain("output format");
+    expect(hot.toLowerCase()).toContain("do not add examples");
+    expect(max.toLowerCase()).toContain("verification");
+  });
+
+  it("Grok contracts use 4-part formula not XML", () => {
+    const warm = getLevelStructureContract("grok-4", 2);
+    const hot = getLevelStructureContract("grok-4", 3);
+    const max = getLevelStructureContract("grok-4", 4);
+
+    expect(warm).toContain("GOAL:");
+    expect(warm.toLowerCase()).toContain("no xml");
+    expect(hot).toContain("QUALITY BAR");
+    expect(max).toContain("EXAMPLES");
+    expect(max).toContain("SUCCESS CRITERIA");
+  });
+
+  it("Gemini contracts put constraints last and enforce level scale", () => {
+    const warm = getLevelStructureContract("gemini-3", 2);
+    const hot = getLevelStructureContract("gemini-3", 3);
+    const max = getLevelStructureContract("gemini-3", 4);
+
+    expect(warm.toLowerCase()).toContain("input:");
+    expect(hot.toLowerCase()).toContain("constraints must be the final");
+    expect(hot.toLowerCase()).toContain("do not add examples");
+    expect(max.toLowerCase()).toContain("verification");
+  });
+
   it("rewrite API uses fixed temperature", () => {
     expect(REWRITE_CONFIG.temperature).toBe(0.3);
   });
@@ -86,6 +150,29 @@ describe("buildMetaPrompt", () => {
     expect(l3.system).toContain("ACTION & DELIVERABLE LANGUAGE");
     expect(l3.system).toContain("CONSTRAINT FRAMING");
     expect(l3.system).toContain("Implement");
+  });
+
+  it("includes GPT-5.5 outcome-first rule from level 2 upward", async () => {
+    const { buildMetaPrompt } = await import("./providers");
+    const warm = buildMetaPrompt({ prompt: "fix my app", model: "gpt-5", level: 2 });
+    const cool = buildMetaPrompt({ prompt: "fix my app", model: "gpt-5", level: 1 });
+    expect(warm.system).toContain("GPT-5.5 OUTCOME-FIRST");
+    expect(cool.system).not.toContain("GPT-5.5 OUTCOME-FIRST");
+  });
+
+  it("includes Composer 2.5 structure rules", async () => {
+    const { buildMetaPrompt } = await import("./providers");
+    const warm = buildMetaPrompt({ prompt: "fix my react app", model: "composer-2.5", level: 2 });
+    expect(warm.system).toContain("COMPOSER 2.5");
+    expect(warm.system.toLowerCase()).toContain("goal + context + input only");
+  });
+
+  it("includes Grok 4 structure rules", async () => {
+    const { buildMetaPrompt } = await import("./providers");
+    const hot = buildMetaPrompt({ prompt: "fix my app", model: "grok-4", level: 3 });
+    expect(hot.system).toContain("GROK 4");
+    expect(hot.system).toContain("QUALITY BAR");
+    expect(hot.system.toLowerCase()).toContain("never xml");
   });
 });
 
