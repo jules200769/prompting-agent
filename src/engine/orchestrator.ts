@@ -7,6 +7,7 @@ import { getPack } from "./packs";
 import { analyze, adherenceLevel, emptySubscores } from "./rubric";
 import { buildDiff } from "./diff";
 import { stripResponseArtifacts } from "./cleanRewrite";
+import { toTerminalSingleLine, stripTerminalStreamChunk } from "../shared/terminalOutput";
 import { optimizeStream } from "./providers";
 import { keyStore } from "../main/keyStore";
 
@@ -33,6 +34,7 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
   }
 
   let raw = "";
+  const terminal = Boolean(request.terminalContext);
   try {
     const res = await optimizeStream(
       {
@@ -41,12 +43,13 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
         level: request.level,
         persona: request.persona,
         context: request.context,
+        terminalContext: request.terminalContext,
         apiKey,
       },
       {
         onText: (chunk) => {
           raw += chunk;
-          ctx.onText(chunk);
+          ctx.onText(terminal ? stripTerminalStreamChunk(chunk) : chunk);
         },
       },
     );
@@ -55,7 +58,10 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
     throw rewriteError(err);
   }
 
-  const optimizedPrompt = stripResponseArtifacts(raw);
+  let optimizedPrompt = stripResponseArtifacts(raw);
+  if (terminal) {
+    optimizedPrompt = toTerminalSingleLine(optimizedPrompt);
+  }
   if (!optimizedPrompt.trim()) {
     throw new Error("Rewrite API returned empty output.");
   }

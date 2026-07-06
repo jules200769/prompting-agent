@@ -4,7 +4,7 @@ import {
   DEFAULT_SETTINGS,
   type CaptureMode,
   type InjectResult,
-  type OptimizeRequest,
+  type OverlayPlacement,
   type Provider,
 } from "../shared/types";
 import { devBridgeOptimize, devBridgeSettingsGet } from "./devBridgeClient";
@@ -94,6 +94,7 @@ function createBrowserMock(): PromptForgeAPI {
       console.info("[promptforge mock] hideOverlay called — no-op in browser preview");
     },
     overlayPrepared: () => undefined,
+    setOverlayPlacement: async (_placement: OverlayPlacement) => true,
 
     onStudioRoute: () => () => undefined,
 

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   isIntegratedTerminalHost,
   isTerminalAccessibilityNoise,
+  isIdeWindowTitleNoise,
+  isCaptureNoiseText,
   isTerminalCaptureContext,
+  isTerminalPaneHint,
   isTerminalWindow,
 } from "./terminalDetect";
 
@@ -58,6 +61,46 @@ describe("isTerminalAccessibilityNoise", () => {
   it("returns false for normal user text", () => {
     expect(isTerminalAccessibilityNoise("npm run build")).toBe(false);
     expect(isTerminalAccessibilityNoise("git status")).toBe(false);
+  });
+
+  it("detects Run the command hint fragments", () => {
+    expect(isTerminalAccessibilityNoise("Run the command: Toggle Screen Reader")).toBe(true);
+  });
+
+  it("detects Terminal N label without line-start anchor", () => {
+    expect(isTerminalAccessibilityNoise("prefix Terminal 30, powershell extra")).toBe(true);
+  });
+});
+
+describe("isIdeWindowTitleNoise", () => {
+  it("detects Cursor window titles", () => {
+    expect(isIdeWindowTitleNoise("apply_inject_flow_hq_3ca28c90.plan.md - prompt-master - Cursor")).toBe(true);
+  });
+
+  it("returns false for normal terminal input", () => {
+    expect(isIdeWindowTitleNoise("maak een app")).toBe(false);
+  });
+});
+
+describe("isCaptureNoiseText", () => {
+  it("combines accessibility and IDE title noise", () => {
+    expect(isCaptureNoiseText("Terminal 15, powershell Run the command:")).toBe(true);
+    expect(isCaptureNoiseText("readme.md - myrepo - Cursor")).toBe(true);
+    expect(isCaptureNoiseText("maak een app")).toBe(false);
+  });
+});
+
+describe("isTerminalPaneHint", () => {
+  it("detects xterm class names", () => {
+    expect(isTerminalPaneHint({ className: "xterm-rows" })).toBe(true);
+  });
+
+  it("detects Terminal N pane names", () => {
+    expect(isTerminalPaneHint({ name: "Terminal 30, powershell" })).toBe(true);
+  });
+
+  it("returns false for monaco editor", () => {
+    expect(isTerminalPaneHint({ className: "monaco-editor", controlType: "ControlType.Document" })).toBe(false);
   });
 });
 

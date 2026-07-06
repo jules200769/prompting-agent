@@ -9,16 +9,24 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { clipboard, app } from "electron";
 import type { CaptureMode } from "../shared/types";
-import { resolveCaptureResult } from "../shared/captureResolve";
+import { resolveCaptureResult, pickResolvedCaptureText } from "../shared/captureResolve";
 import { shouldUseEarlyCaptureFastPath } from "../shared/captureFastPath";
-import { isTerminalCaptureContext, isTerminalAccessibilityNoise } from "../shared/terminalDetect";
+import { isTerminalCaptureContext, isCaptureNoiseText } from "../shared/terminalDetect";
 import {
   resolveCaptureFromPossibleTerminal,
   isTerminalBufferDump,
   type TerminalCaptureResolution,
+  type TerminalBounds,
   type TerminalSnapshotContext,
 } from "../shared/terminalCapture";
-import { getForegroundHwnd, normalizeHwnd } from "./win32";
+import { getForegroundHwnd, normalizeHwnd, allowSetForeground } from "./win32";
+import {
+  classifyInjectHostKind,
+  terminalUsesConhostCopy,
+  buildInjectMetaPayload,
+  type HostKind,
+} from "../shared/injectStrategy";
+import { toTerminalSingleLine } from "../shared/terminalOutput";
 
 type SkipHwndProvider = () => number[];
 
@@ -36,10 +44,25 @@ export interface UiaTargetMeta {
   className: string;
   controlType: string;
   bounds: { left: number; top: number; right: number; bottom: number };
+  hostKind?: HostKind;
+  topClassName?: string;
+  processName?: string;
+}
+
+export interface InjectTarget {
+  windowHwnd: number;
+  uia: UiaTargetMeta | null;
+  hostKind: HostKind;
+  processName?: string;
+  topClassName?: string;
+  /** True for classic conhost — line-select uses Home/Shift+End instead of Ctrl+A. */
+  terminalUseConhostCopy?: boolean;
+  /** Frozen terminal pane bounds from hotkey snapshot (inject focus when UIA resolve fails). */
+  terminalBounds?: TerminalBounds;
 }
 
 /** Frozen inject target from the last successful capture (survives overlay focus changes). */
-let frozenInjectTarget: { windowHwnd: number; uia: UiaTargetMeta | null } | null = null;
+let frozenInjectTarget: InjectTarget | null = null;
 /** UIA element snapshotted at hotkey time, before any window hide/focus steal. */
 let pendingUiaMeta: UiaTargetMeta | null = null;
 /** Text read during pre-hide UIA snapshot (focus is still stable). */
@@ -68,9 +91,13 @@ function scriptPath(name: string): string {
 
 function psFile(args: string[]): Promise<{ stdout: string; code: number }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args], {
-      windowsHide: true,
-    });
+    const child = spawn(
+      "powershell.exe",
+      ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args],
+      {
+        windowsHide: true,
+      },
+    );
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => (stdout += d.toString()));
@@ -180,14 +207,84 @@ async function readCaptureMeta(metaPath: string): Promise<UiaTargetMeta | null> 
     if (runtimeId.length === 0 && !parsed.bounds) return null;
     return { ...parsed, runtimeId };
   } catch (err) {
-    console.warn("[PromptForge] readCaptureMeta failed:", err);
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      console.warn("[PromptForge] readCaptureMeta failed:", err);
+    }
     return null;
   }
 }
 
-function freezeInjectTarget(windowHwnd: number, uia: UiaTargetMeta | null): void {
+function buildInjectTarget(
+  windowHwnd: number,
+  uia: UiaTargetMeta | null,
+  ctx?: { topClassName?: string; processName?: string },
+): InjectTarget {
+  const topClassName = ctx?.topClassName ?? uia?.topClassName ?? lastSnapshotContext.className;
+  const processName = ctx?.processName ?? uia?.processName ?? lastSnapshotContext.process;
+  const hostKind =
+    uia?.hostKind ??
+    classifyInjectHostKind({
+      topClassName,
+      processName,
+      focusedIsTerminalPane: lastSnapshotContext.focusedIsTerminalPane,
+      elementClassName: uia?.className,
+      controlType: uia?.controlType,
+    });
+  return {
+    windowHwnd,
+    uia,
+    hostKind,
+    processName,
+    topClassName,
+    terminalUseConhostCopy: hostKind === "terminal" ? terminalUsesConhostCopy(topClassName) : undefined,
+  };
+}
+
+function freezeInjectTarget(
+  windowHwnd: number,
+  uia: UiaTargetMeta | null,
+  ctx?: { topClassName?: string; processName?: string },
+): void {
   lastForegroundHwnd = windowHwnd;
-  frozenInjectTarget = { windowHwnd, uia };
+  frozenInjectTarget = buildInjectTarget(windowHwnd, uia, ctx);
+}
+
+function freezeTerminalInjectTarget(windowHwnd: number, ctx?: TerminalSnapshotContext): void {
+  lastForegroundHwnd = windowHwnd;
+  frozenInjectTarget = {
+    windowHwnd,
+    uia: null,
+    hostKind: "terminal",
+    processName: ctx?.process,
+    topClassName: ctx?.className,
+    terminalUseConhostCopy: terminalUsesConhostCopy(ctx?.className),
+    terminalBounds: ctx?.terminalBounds,
+  };
+}
+
+/** HWND of the frozen inject target (for focus polling before Apply). */
+export function getFrozenInjectHwnd(): number | null {
+  const h = frozenInjectTarget?.windowHwnd ?? lastForegroundHwnd;
+  return h != null && h > 0 ? h : null;
+}
+
+/** Poll until the target window is foreground again after overlay hide. */
+export async function waitUntilForeground(
+  targetHwnd: number,
+  opts?: { timeoutMs?: number; pollMs?: number },
+): Promise<boolean> {
+  allowSetForeground();
+  const timeoutMs = opts?.timeoutMs ?? 500;
+  const pollMs = opts?.pollMs ?? 16;
+  const target = normalizeHwnd(targetHwnd);
+  if (target === 0) return false;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (getForegroundHwnd() === target) return true;
+    await sleep(pollMs);
+  }
+  return getForegroundHwnd() === target;
 }
 
 interface HotkeySnapshotJson {
@@ -196,14 +293,16 @@ interface HotkeySnapshotJson {
   chars?: number;
   className?: string;
   process?: string;
+  hostKind?: HostKind;
   isTerminal?: boolean;
   focusedIsTerminalPane?: boolean;
   hasSelection?: boolean;
+  terminalBounds?: TerminalBounds;
 }
 
 function sanitizeCaptureText(text: string | null | undefined): string | null {
   const trimmed = text?.trim() ?? "";
-  if (!trimmed || isTerminalAccessibilityNoise(trimmed)) return null;
+  if (!trimmed || isCaptureNoiseText(trimmed)) return null;
   if (isTerminalBufferDump(trimmed)) {
     return resolveCaptureFromPossibleTerminal(trimmed, lastSnapshotContext).text || null;
   }
@@ -222,38 +321,51 @@ function finalizeCaptureText(raw: string): TerminalCaptureResolution {
 
 /** Combined foreground + UIA snapshot in one PS spawn (call before hideForCapture on slow path). */
 export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
+  prepareCaptureTarget();
+  const preparedHwnd = lastForegroundHwnd ?? 0;
+  allowSetForeground();
+
   const metaPath = join(tmpdir(), `promptforge-uia-snapshot-${Date.now()}.json`);
   const textPath = join(tmpdir(), `promptforge-uia-text-${Date.now()}.txt`);
   pendingIsTerminal = false;
   lastSnapshotContext = {};
   try {
-    const { stdout } = await psFile([
+    const psArgs = [
       "-File",
       scriptPath("win-hotkey-snapshot.ps1"),
       "-MetaPath",
       metaPath,
       "-TextPath",
       textPath,
-    ]);
+    ];
+    if (preparedHwnd > 0) {
+      psArgs.push("-TargetHwnd", String(preparedHwnd));
+    }
+    const { stdout } = await psFile(psArgs);
     let summary: HotkeySnapshotJson | null = null;
     try {
       summary = JSON.parse(stdout.trim()) as HotkeySnapshotJson;
     } catch {
       /* stdout may include non-JSON noise from PS; meta files are authoritative */
     }
-    const hwnd = normalizeHwnd(summary?.hwnd ?? 0);
+    const summaryHwnd = normalizeHwnd(summary?.hwnd ?? 0);
+    const skip = new Set(getSkipHwnds().map(normalizeHwnd));
+    const hwnd =
+      preparedHwnd > 0 && !skip.has(preparedHwnd)
+        ? preparedHwnd
+        : summaryHwnd > 0 && !skip.has(summaryHwnd)
+          ? summaryHwnd
+          : 0;
     if (hwnd > 0) {
-      const skip = new Set(getSkipHwnds().map(normalizeHwnd));
-      if (!skip.has(hwnd)) {
-        lastTrackedForegroundHwnd = hwnd;
-        lastForegroundHwnd = hwnd;
-      }
+      lastTrackedForegroundHwnd = hwnd;
+      lastForegroundHwnd = hwnd;
     }
 
     lastSnapshotContext = {
       className: summary?.className,
       process: summary?.process,
       focusedIsTerminalPane: summary?.focusedIsTerminalPane,
+      terminalBounds: summary?.terminalBounds,
     };
 
     pendingIsTerminal =
@@ -389,11 +501,11 @@ export async function captureSelection(): Promise<CaptureResult> {
   if (pendingIsTerminal) {
     pendingIsTerminal = false;
     pendingUiaMeta = null;
-    frozenInjectTarget = null;
     const raw = consumeEarlyCaptureText()?.trim() ?? "";
     const resolved = finalizeCaptureText(raw);
     if (resolved.mode === "terminal" && resolved.text) {
       console.log("[PromptForge] capture: terminal", resolved.text.length, "chars");
+      freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
       return {
         text: resolved.text,
         mode: "terminal",
@@ -419,9 +531,9 @@ export async function captureSelection(): Promise<CaptureResult> {
     pendingCaptureText = null;
     pendingUiaMeta = null;
     const resolved = finalizeCaptureText(earlyTextPeek!.trim());
-    if (resolved.mode === "terminal") {
+    if (resolved.mode === "terminal" && resolved.text) {
       console.log("[PromptForge] capture: terminal fast-path", resolved.text.length, "chars");
-      frozenInjectTarget = null;
+      freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
       return {
         text: resolved.text,
         mode: "terminal",
@@ -430,27 +542,46 @@ export async function captureSelection(): Promise<CaptureResult> {
         terminalContext: true,
       };
     }
-    const text = resolved.text;
-    console.log("[PromptForge] capture: fast-path", text.length, "chars");
-    console.log(
-      "[PromptForge] capture: uia",
-      earlyUiaPeek!.className,
-      "runtimeId",
-      earlyUiaPeek!.runtimeId.join(","),
-    );
-    freezeInjectTarget(hwnd, earlyUiaPeek);
-    return { text, mode: "field", snapshot, uia: earlyUiaPeek };
+    if (resolved.mode === "field" && resolved.text.trim()) {
+      const text = resolved.text;
+      console.log("[PromptForge] capture: fast-path", text.length, "chars");
+      console.log(
+        "[PromptForge] capture: uia",
+        earlyUiaPeek!.className,
+        "runtimeId",
+        earlyUiaPeek!.runtimeId.join(","),
+      );
+      freezeInjectTarget(hwnd, earlyUiaPeek, {
+        topClassName: lastSnapshotContext.className,
+        processName: lastSnapshotContext.process,
+      });
+      return { text, mode: "field", snapshot, uia: earlyUiaPeek };
+    }
+    pendingCaptureText = earlyTextPeek;
+    pendingUiaMeta = earlyUiaPeek;
   }
+
+  const inTerminalContext = isTerminalCaptureContext(
+    lastSnapshotContext.className,
+    lastSnapshotContext.process,
+    lastSnapshotContext.focusedIsTerminalPane,
+  );
 
   const metaPath = join(tmpdir(), `promptforge-capture-meta-${Date.now()}.json`);
   let captured = "";
-  try {
-    captured = await captureViaScript(hwnd, metaPath);
-  } catch (err) {
-    console.warn("[PromptForge] capture script failed:", err);
+  if (!inTerminalContext) {
+    try {
+      captured = await captureViaScript(hwnd, metaPath);
+    } catch (err) {
+      console.warn("[PromptForge] capture script failed:", err);
+    }
+  } else {
+    console.log("[PromptForge] capture: skipping win-capture.ps1 for terminal context");
   }
-  const uiaFromScript = await readCaptureMeta(metaPath);
-  await unlink(metaPath).catch(() => {});
+  const uiaFromScript = inTerminalContext ? null : await readCaptureMeta(metaPath);
+  if (!inTerminalContext) {
+    await unlink(metaPath).catch(() => {});
+  }
   const uiaMeta = consumeUiaMeta(uiaFromScript);
   const earlyText = consumeEarlyCaptureText();
   const picked = pickCaptureText(captured, earlyText);
@@ -458,7 +589,7 @@ export async function captureSelection(): Promise<CaptureResult> {
 
   if (resolved.mode === "terminal" && resolved.text) {
     console.log("[PromptForge] capture: terminal (slow-path)", resolved.text.length, "chars");
-    frozenInjectTarget = null;
+    freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
     return {
       text: resolved.text,
       mode: "terminal",
@@ -468,7 +599,7 @@ export async function captureSelection(): Promise<CaptureResult> {
     };
   }
 
-  const text = resolved.mode === "field" ? resolved.text : picked;
+  const text = pickResolvedCaptureText(resolved, picked);
 
   if (text.trim()) {
     console.log("[PromptForge] capture: got", text.trim().length, "chars");
@@ -477,7 +608,10 @@ export async function captureSelection(): Promise<CaptureResult> {
     } else {
       console.warn("[PromptForge] capture: no UIA metadata (inject may fail in Chromium apps)");
     }
-    freezeInjectTarget(hwnd, uiaMeta);
+    freezeInjectTarget(hwnd, uiaMeta, {
+      topClassName: lastSnapshotContext.className,
+      processName: lastSnapshotContext.process,
+    });
     return { text: text.trim(), mode: "field", snapshot, uia: uiaMeta };
   }
 
@@ -491,7 +625,7 @@ export async function captureSelection(): Promise<CaptureResult> {
 
   const resolvedText = finalizeCaptureText(pickCaptureText(fallbackResult.text, earlyText).trim());
   if (resolvedText.mode === "terminal" && resolvedText.text) {
-    frozenInjectTarget = null;
+    freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
     return {
       text: resolvedText.text,
       mode: "terminal",
@@ -501,8 +635,22 @@ export async function captureSelection(): Promise<CaptureResult> {
     };
   }
   if (resolvedText.mode === "field" && resolvedText.text.trim()) {
-    freezeInjectTarget(hwnd, uiaMeta);
+    freezeInjectTarget(hwnd, uiaMeta, {
+      topClassName: lastSnapshotContext.className,
+      processName: lastSnapshotContext.process,
+    });
     return { text: resolvedText.text.trim(), mode: "field", snapshot, uia: uiaMeta };
+  }
+
+  if (inTerminalContext) {
+    restoreClipboardSnapshot(snapshot);
+    return {
+      text: "",
+      mode: "empty",
+      snapshot: { text: "", hasText: false },
+      uia: null,
+      terminalContext: true,
+    };
   }
 
   restoreClipboardSnapshot(snapshot);
@@ -510,28 +658,39 @@ export async function captureSelection(): Promise<CaptureResult> {
 }
 
 export async function injectText(text: string, snapshot: { text: string; hasText: boolean }): Promise<"injected" | "copied"> {
-  const target = frozenInjectTarget ?? (
-    lastForegroundHwnd != null ? { windowHwnd: lastForegroundHwnd, uia: null } : null
-  );
+  const target =
+    frozenInjectTarget ??
+    (lastForegroundHwnd != null
+      ? buildInjectTarget(lastForegroundHwnd, null, {
+          topClassName: lastSnapshotContext.className,
+          processName: lastSnapshotContext.process,
+        })
+      : null);
+
+  const normalizedText =
+    target?.hostKind === "terminal" ? toTerminalSingleLine(text) : text;
 
   if (target == null || target.windowHwnd === 0) {
-    clipboard.writeText(text);
+    clipboard.writeText(normalizedText);
     return "copied";
   }
 
   console.log(
     "[PromptForge] inject: window hwnd",
     target.windowHwnd,
+    `host ${target.hostKind}`,
     target.uia ? `uia ${target.uia.className} rid=${target.uia.runtimeId.join(",")}` : "uia (none)",
+    target.hostKind === "terminal"
+      ? `process ${target.processName ?? "(none)"} bounds ${target.terminalBounds ? "yes" : "no"}`
+      : "",
   );
 
   const tmpPath = join(tmpdir(), `promptforge-inject-${Date.now()}.txt`);
   const metaPath = join(tmpdir(), `promptforge-inject-meta-${Date.now()}.json`);
+  let injected = false;
   try {
-    await writeFile(tmpPath, text, "utf8");
-    if (target.uia) {
-      await writeFile(metaPath, JSON.stringify(target.uia), "utf8");
-    }
+    await writeFile(tmpPath, normalizedText, "utf8");
+    await writeFile(metaPath, JSON.stringify(buildInjectMetaPayload(target)), "utf8");
     const args = [
       "-File",
       scriptPath("win-inject.ps1"),
@@ -539,10 +698,9 @@ export async function injectText(text: string, snapshot: { text: string; hasText
       String(target.windowHwnd),
       "-TextPath",
       tmpPath,
+      "-MetaPath",
+      metaPath,
     ];
-    if (target.uia) {
-      args.push("-MetaPath", metaPath);
-    }
     const { stdout, code } = await psFile(args);
     for (const line of stdout.split("\n")) {
       if (line.startsWith("PF_INJECT")) console.log("[PromptForge]", line);
@@ -550,19 +708,26 @@ export async function injectText(text: string, snapshot: { text: string; hasText
     if (code !== 0 || !stdout.includes("PF_INJECT_OK")) {
       throw new Error(`inject not verified (exit ${code})`);
     }
+    injected = true;
   } catch (err) {
     console.warn("[PromptForge] inject script failed:", err);
-    clipboard.writeText(text);
-    restoreClipboardSnapshot(snapshot);
+    clipboard.writeText(normalizedText);
+    // Keep refined text on clipboard for manual paste — do not restore pre-capture snapshot.
     return "copied";
   } finally {
     await unlink(tmpPath).catch(() => {});
     await unlink(metaPath).catch(() => {});
+  }
+
+  if (injected) {
     frozenInjectTarget = null;
+    await sleep(200);
+    restoreClipboardSnapshot(snapshot);
+    return "injected";
   }
 
   restoreClipboardSnapshot(snapshot);
-  return "injected";
+  return "copied";
 }
 
 export async function restoreForeground(): Promise<void> {

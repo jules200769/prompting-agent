@@ -26,6 +26,7 @@ function Get-FocusedElementText {
       } catch {}
     }
     if ([string]::IsNullOrEmpty($text)) { return $null }
+    if (Test-IsCaptureNoise $text) { return $null }
     return @{ Element = $el; Text = $text; Method = "focusedElement" }
   } catch {}
   return $null
@@ -47,10 +48,77 @@ function Get-UiaText([IntPtr]$focusHwnd) {
     } catch {}
   }
   if ([string]::IsNullOrEmpty($text)) { return $null }
+  if (Test-IsCaptureNoise $text) { return $null }
   return @{ Element = $el; Text = $text; Method = "uiaFocusHwnd" }
 }
 
 $script:BestInjectElement = $null
+$script:TopClassName = ""
+
+function Test-IsIntegratedTerminalHost([string]$processName) {
+  $proc = if ($processName) { $processName } else { "" }
+  $proc = $proc.ToLowerInvariant() -replace '\.exe$', ''
+  return $proc -in @('cursor', 'code', 'code - insiders')
+}
+
+function Test-IsTerminalAccessibilityNoise([string]$text) {
+  if ([string]::IsNullOrEmpty($text)) { return $false }
+  if ($text -match '(?i)Toggle Screen Reader Accessibility Mode') { return $true }
+  if ($text -match '(?i)Alt\+F1 for terminal accessibility help') { return $true }
+  if ($text -match '(?i)Run the command:') { return $true }
+  if ($text -match '(?i)Terminal \d+,?\s*(powershell|pwsh|cmd|bash|zsh|wsl|sh)\b') { return $true }
+  return $false
+}
+
+function Test-IsIdeWindowTitleNoise([string]$text) {
+  if ([string]::IsNullOrEmpty($text)) { return $false }
+  if ($text -match '(?i)\s-\s.+?\s-\s(Cursor|Visual Studio Code)\s*$') { return $true }
+  if ($text -match '(?i)\s-\s.+\s-\sCode\s*$') { return $true }
+  if ($text -match '(?i)\s-\sCursor\s*$') { return $true }
+  return $false
+}
+
+function Test-IsCaptureNoise([string]$text) {
+  return (Test-IsTerminalAccessibilityNoise $text) -or (Test-IsIdeWindowTitleNoise $text)
+}
+
+function Test-FocusedElementIsTerminalPane($el) {
+  if ($null -eq $el) { return $false }
+  try {
+    $name = $el.Current.Name
+    if ($name -match '(?i)^Terminal \d+') { return $true }
+    $aid = $el.Current.AutomationId
+    if ($aid -match '(?i)terminal') { return $true }
+    $cls = $el.Current.ClassName
+    if ($cls -match '(?i)terminal|xterm') { return $true }
+  } catch {}
+  return $false
+}
+
+function Test-ElementHasTerminalAncestor($el) {
+  if ($null -eq $el) { return $false }
+  $cur = $el
+  for ($i = 0; $i -lt 12 -and $null -ne $cur; $i++) {
+    if (Test-FocusedElementIsTerminalPane $cur) { return $true }
+    try { $cur = $cur.GetParent() } catch { break }
+  }
+  return $false
+}
+
+function Test-ShouldSkipIntegratedTerminalCapture([string]$processName) {
+  if (-not (Test-IsIntegratedTerminalHost $processName)) { return $false }
+  try {
+    $el = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -eq $el) { return $false }
+    return (Test-FocusedElementIsTerminalPane $el) -or (Test-ElementHasTerminalAncestor $el)
+  } catch {}
+  return $false
+}
+
+try {
+  $topEl = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($WindowHandle))
+  if ($null -ne $topEl) { $script:TopClassName = $topEl.Current.ClassName }
+} catch {}
 
 function Remember-InjectElement($el, [string]$method) {
   if ($null -ne $el) { $script:BestInjectElement = @{ Element = $el; Method = $method } }
@@ -63,13 +131,18 @@ function Try-RememberFocusedElement([string]$method) {
   } catch {}
 }
 
+function Write-CaptureMeta($el, [string]$method) {
+  Write-ElementMeta $el $method $MetaPath $script:TopClassName $script:ProcessName
+}
+
 function Emit-ClipboardCapture([string]$clip, [string]$method) {
+  if (Test-IsCaptureNoise $clip) { return $false }
   if ($null -ne $script:BestInjectElement) {
-    Write-ElementMeta $script:BestInjectElement.Element $script:BestInjectElement.Method $MetaPath
+    Write-CaptureMeta $script:BestInjectElement.Element $script:BestInjectElement.Method
   } else {
     Try-RememberFocusedElement $method
     if ($null -ne $script:BestInjectElement) {
-      Write-ElementMeta $script:BestInjectElement.Element $method $MetaPath
+      Write-CaptureMeta $script:BestInjectElement.Element $method
     }
   }
   Write-Output $clip
@@ -78,7 +151,7 @@ function Emit-ClipboardCapture([string]$clip, [string]$method) {
 
 function Emit-Capture($result) {
   Write-Output $result.Text
-  Write-ElementMeta $result.Element $result.Method $MetaPath
+  Write-CaptureMeta $result.Element $result.Method
   exit 0
 }
 
@@ -138,6 +211,15 @@ public static class WinCapture {
   }
 }
 '@ -ErrorAction SilentlyContinue
+
+$script:ProcessName = ""
+try {
+  $procId = [uint32]0
+  [void][WinCapture]::GetWindowThreadProcessId([IntPtr]::new($WindowHandle), [ref]$procId)
+  if ($procId -gt 0) {
+    $script:ProcessName = (Get-Process -Id $procId -ErrorAction SilentlyContinue).ProcessName
+  }
+} catch {}
 
 function Wait-CaptureReady([IntPtr]$topLevel, [int]$timeoutMs = 500, [int]$intervalMs = 50) {
   $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
@@ -199,6 +281,7 @@ function Wait-ClipboardText([int]$timeoutMs = 400, [int]$intervalMs = 50) {
 }
 
 function Emit-MessageCapture([IntPtr]$focusHwnd, [string]$text) {
+  if (Test-IsCaptureNoise $text) { return $false }
   Try-RememberFocusedElement "wmGetText"
   if ($null -eq $script:BestInjectElement) {
     try {
@@ -207,7 +290,7 @@ function Emit-MessageCapture([IntPtr]$focusHwnd, [string]$text) {
     } catch {}
   }
   if ($null -ne $script:BestInjectElement) {
-    Write-ElementMeta $script:BestInjectElement.Element $script:BestInjectElement.Method $MetaPath
+    Write-CaptureMeta $script:BestInjectElement.Element $script:BestInjectElement.Method
   }
   Write-Output $text
   exit 0
@@ -215,6 +298,10 @@ function Emit-MessageCapture([IntPtr]$focusHwnd, [string]$text) {
 
 $top = [IntPtr]::new($WindowHandle)
 $focus = Wait-CaptureReady $top
+
+if (Test-ShouldSkipIntegratedTerminalCapture $script:ProcessName) {
+  exit 1
+}
 
 Try-RememberFocusedElement "initialFocus"
 
@@ -227,7 +314,7 @@ if ($null -ne $result) { Emit-Capture $result }
 $focus = [WinCapture]::GetFocusHwnd($top)
 if ($focus -ne [IntPtr]::Zero) {
   $text = Invoke-WithMessageTextRetries $focus
-  if (-not [string]::IsNullOrEmpty($text)) {
+  if (-not [string]::IsNullOrEmpty($text) -and -not (Test-IsCaptureNoise $text)) {
     Emit-MessageCapture $focus $text
   }
 }

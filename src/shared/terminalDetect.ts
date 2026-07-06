@@ -46,7 +46,43 @@ export function isTerminalAccessibilityNoise(text: string | undefined): boolean 
   if (!t) return false;
   if (/Toggle Screen Reader Accessibility Mode/i.test(t)) return true;
   if (/Alt\+F1 for terminal accessibility help/i.test(t)) return true;
-  if (/^Terminal \d+,?\s*(powershell|pwsh|cmd|bash|zsh|wsl|sh)\b/i.test(t)) return true;
+  if (/Run the command:/i.test(t)) return true;
+  if (/Terminal \d+,?\s*(powershell|pwsh|cmd|bash|zsh|wsl|sh)\b/i.test(t)) return true;
+  return false;
+}
+
+/** Cursor/VS Code window or tab titles accidentally read via UIA/WM_GETTEXT. */
+export function isIdeWindowTitleNoise(text: string | undefined): boolean {
+  const t = (text ?? "").trim();
+  if (!t) return false;
+  if (/\s-\s.+?\s-\s(Cursor|Visual Studio Code)\s*$/i.test(t)) return true;
+  if (/\s-\s.+\s-\sCode\s*$/i.test(t)) return true;
+  if (/\s-\sCursor\s*$/i.test(t)) return true;
+  return false;
+}
+
+/** Text that must never be treated as user capture input. */
+export function isCaptureNoiseText(text: string | undefined): boolean {
+  return isTerminalAccessibilityNoise(text) || isIdeWindowTitleNoise(text);
+}
+
+/** UIA hints that a single element belongs to an integrated terminal pane. */
+export function isTerminalPaneHint(opts: {
+  className?: string;
+  automationId?: string;
+  name?: string;
+  controlType?: string;
+}): boolean {
+  const name = (opts.name ?? "").trim();
+  if (/^Terminal \d+/i.test(name)) return true;
+  const aid = (opts.automationId ?? "").trim();
+  if (/terminal/i.test(aid)) return true;
+  const cls = (opts.className ?? "").trim();
+  if (/terminal|xterm/i.test(cls)) return true;
+  const ct = opts.controlType ?? "";
+  if (ct === "ControlType.Pane" && /(powershell|pwsh|cmd|bash|zsh|wsl|git bash)/i.test(name)) return true;
+  if (ct === "ControlType.Document" && /Windows/i.test(cls)) return true;
+  if (/Console/i.test(cls)) return true;
   return false;
 }
 

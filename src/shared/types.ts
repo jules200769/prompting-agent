@@ -90,6 +90,8 @@ export interface OptimizeRequest {
   context?: string;
   /** When true, bypass persisted opt cache (e.g. overlay Regenerate). */
   skipCache?: boolean;
+  /** Terminal capture: refined output must be a single line (no newlines) for shell paste. */
+  terminalContext?: boolean;
 }
 
 export interface LibraryItem {
@@ -116,6 +118,28 @@ export interface HistoryItem {
   createdAt: number;
 }
 
+export type OverlayPlacement = "center" | "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+
+export const OVERLAY_PLACEMENTS: OverlayPlacement[] = [
+  "topLeft",
+  "topRight",
+  "center",
+  "bottomLeft",
+  "bottomRight",
+];
+
+export const OVERLAY_PLACEMENT_LABELS: Record<OverlayPlacement, string> = {
+  center: "Center",
+  topLeft: "Top left",
+  topRight: "Top right",
+  bottomLeft: "Bottom left",
+  bottomRight: "Bottom right",
+};
+
+export function isOverlayPlacement(value: unknown): value is OverlayPlacement {
+  return typeof value === "string" && (OVERLAY_PLACEMENTS as string[]).includes(value);
+}
+
 export interface AppSettings {
   hotkey: string; // e.g. "CommandOrControl+Shift+O"
   defaultModel: ModelId;
@@ -126,6 +150,7 @@ export interface AppSettings {
   providerKeys: Partial<Record<Provider, boolean>>; // presence flags only (keys live in OS keychain)
   telemetry: boolean;
   theme: "dark" | "light";
+  overlayPlacement: OverlayPlacement;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -138,6 +163,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   providerKeys: {},
   telemetry: false,
   theme: "dark",
+  overlayPlacement: "center",
 };
 
 export const RUBRIC_WEIGHTS: SubScores = {
@@ -183,6 +209,7 @@ export const IPC = {
   OVERLAY_PREPARED: "promptforge:overlay:prepared",
   OVERLAY_HIDE: "promptforge:overlay:hide",
   OVERLAY_CLEAR: "promptforge:overlay:clear",
+  OVERLAY_PLACEMENT_SET: "promptforge:overlay:placement-set",
   STUDIO_SHOW: "promptforge:studio:show",
   STUDIO_SETTINGS: "promptforge:studio:settings",
   STUDIO_ROUTE: "promptforge:studio:route",

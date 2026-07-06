@@ -14,6 +14,8 @@ export interface OptimizeParams {
   persona?: string;
   context?: string;
   apiKey: string;
+  /** Shell/terminal paste: force single-line plain output. */
+  terminalContext?: boolean;
 }
 
 export interface StreamCallbacks {
@@ -51,6 +53,20 @@ CONSTRAINT FRAMING (Level 3+):
 `
       : "";
 
+  const terminalOutputRule = params.terminalContext
+    ? `
+TERMINAL SHELL (mandatory — overrides structure contract above):
+- The user will paste this into a command-line prompt that accepts ONE line only
+- Output a SINGLE line of plain text: NO line breaks, NO newlines, NO XML tags, NO markdown headers
+- Join clauses with spaces or semicolons; never press Enter between parts
+- Intensity (Cool–Max) affects clarity and wording only — never multi-line or tagged structure
+`
+    : "";
+
+  const structureBlock = params.terminalContext
+    ? "STRUCTURE CONTRACT (mandatory):\n- Single line of plain prose only (see TERMINAL SHELL above)"
+    : structureContract;
+
   const system = `You are an expert prompt engineer specializing in ${pack.label}.
 
 Your job: refine the user's prompt following the official prompting guide below. The refined prompt is what the user will paste into ${pack.label}.
@@ -61,13 +77,13 @@ ${guide}
 
 ${levelLine}
 
-${structureContract}
-${actionLanguageRule}${constraintFramingRule}
+${structureBlock}
+${terminalOutputRule}${actionLanguageRule}${constraintFramingRule}
 ${personaLine}${personaLine ? "\n" : ""}${contextLine}
 
 OUTPUT RULES (strict):
 - Preserve the user's intent and facts; do not invent details about their situation
-- Follow the STRUCTURE CONTRACT exactly for this level — Cool must stay plain prose; Max must keep all Level 3 section tags plus examples and success criteria
+${params.terminalContext ? "- ONE line only — no \\n or paragraph breaks anywhere in the output" : "- Follow the STRUCTURE CONTRACT exactly for this level — Cool must stay plain prose; Max must keep all Level 3 section tags plus examples and success criteria"}
 - Return ONLY the refined prompt as plain text
 - No JSON, no markdown fences, no commentary, no scores, no preamble like "Here is..."
 - The output must be ready to copy-paste directly into ${pack.label}`;

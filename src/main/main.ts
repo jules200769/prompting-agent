@@ -1,7 +1,8 @@
 // Electron main: lifecycle, overlay + studio windows, tray, global hotkey, IPC.
 import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell, screen } from "electron";
 import { join } from "node:path";
-import { IPC, type AppSettings, type CaptureMode, type OptimizeRequest, type Provider } from "../shared/types";
+import { IPC, type AppSettings, type CaptureMode, type OptimizeRequest, type OverlayPlacement, type Provider, isOverlayPlacement } from "../shared/types";
+import { resolveOverlayPosition } from "../shared/overlayPosition";
 import { analyze } from "../engine/orchestrator";
 import * as store from "./storage";
 import { keyStore } from "./keyStore";
@@ -17,6 +18,8 @@ import {
   hotkeySnapshot,
   canUseEarlyCaptureFastPath,
   warmCaptureBridge,
+  getFrozenInjectHwnd,
+  waitUntilForeground,
   hwndFromBuffer,
   sleep,
 } from "./capture";
@@ -47,7 +50,11 @@ let pendingCapture: {
 } | null = null;
 let isOptimizing = false;
 let hotkeyInFlight = false;
+/** True while the overlay session is open (user-visible popup); not the same as isVisible() when resident. */
+let overlaySessionOpen = false;
 let overlayPreparedResolve: (() => void) | null = null;
+
+const OVERLAY_SIZE = { width: 720, height: 520 };
 
 function loadUrl(win: BrowserWindow, route: string): void {
   if (isDev) {
@@ -59,8 +66,8 @@ function loadUrl(win: BrowserWindow, route: string): void {
 
 function createOverlay(): BrowserWindow {
   const w = new BrowserWindow({
-    width: 720,
-    height: 520,
+    width: OVERLAY_SIZE.width,
+    height: OVERLAY_SIZE.height,
     show: false,
     frame: false,
     transparent: true,
@@ -82,7 +89,8 @@ function createOverlay(): BrowserWindow {
     },
   });
   w.on("blur", () => {
-    if (w.isVisible()) void hideOverlay();
+    // Ignore blur while hotkey capture runs — showOverlayShell + FocusWindow can spuriously blur.
+    if (overlaySessionOpen && !hotkeyInFlight) void hideOverlay();
   });
   loadUrl(w, "/overlay");
   return w;
@@ -113,16 +121,16 @@ function createStudio(): BrowserWindow {
   return w;
 }
 
-// Center the overlay on the active display work area.
-function positionOverlayCenter(): void {
+// Place the overlay from the user's snap placement on the active display work area.
+function positionOverlay(): void {
   if (!overlay) return;
   const cursor = screen.getCursorScreenPoint();
-  const display = screen.getDisplayNearestPoint(cursor);
-  const { x: ax, y: ay, width: aw, height: ah } = display.workArea;
-  const [w, h] = overlay.getSize();
-  const x = Math.round(ax + (aw - w) / 2);
-  const y = Math.round(ay + (ah - h) / 2);
-  overlay.setPosition(x, y);
+  const active = screen.getDisplayNearestPoint(cursor).workArea;
+  store.migrateLegacyOverlayPlacement(active, OVERLAY_SIZE);
+  const settings = store.getSettings();
+  const [width, height] = overlay.getSize();
+  const pos = resolveOverlayPosition(settings.overlayPlacement, { width, height }, active);
+  overlay.setPosition(pos.x, pos.y);
 }
 
 /** Wait until the renderer has applied pending/show state (avoids stale-content flash). */
@@ -140,14 +148,14 @@ function waitForOverlayPrepared(timeoutMs = 200): Promise<void> {
   });
 }
 
-/** Show overlay once per hotkey — skip if already visible (no 2nd showInactive / reposition). */
+/** Position and show overlay at opacity 0 (resident window skips showInactive when already shown). */
 function revealOverlay(): void {
   if (!overlay) overlay = createOverlay();
-  if (overlay.isVisible()) return;
-  positionOverlayCenter();
-  // Hide compositor white flash on transparent windows until renderer paints.
+  positionOverlay();
   overlay.setOpacity(0);
-  overlay.showInactive();
+  if (!overlay.isVisible()) {
+    overlay.showInactive();
+  }
 }
 
 async function deliverCaptureToOverlay(capture: {
@@ -163,6 +171,10 @@ async function deliverCaptureToOverlay(capture: {
     });
   }
   pendingCapture = capture;
+  // When showOverlayShell() already ran, skip reveal — second OVERLAY_SHOW only updates text.
+  if (!overlaySessionOpen) {
+    revealOverlay();
+  }
   const prepared = waitForOverlayPrepared();
   overlay.webContents.send(IPC.OVERLAY_SHOW, {
     text: capture.text,
@@ -171,34 +183,27 @@ async function deliverCaptureToOverlay(capture: {
     terminalContext: capture.terminalContext ?? false,
   });
   await prepared;
-  if (!overlay.isVisible()) {
-    revealOverlay();
-    overlay.webContents.invalidate();
-    // One compositor tick before fade-in (reduces white flash on transparent win).
-    await sleep(16);
-  }
   overlay.setOpacity(1);
+  overlaySessionOpen = true;
 }
 
 async function hideOverlay(): Promise<void> {
   if (!overlay) return;
   pendingCapture = null;
+  overlaySessionOpen = false;
   if (overlay.isVisible()) {
     overlay.setOpacity(0);
   }
   const prepared = waitForOverlayPrepared();
   overlay.webContents.send(IPC.OVERLAY_CLEAR);
   await prepared;
-  if (overlay.isVisible()) {
-    overlay.hide();
-  }
-  // Stay at opacity 0 until the next reveal paints fresh content.
   overlay.setOpacity(0);
 }
 
 /** Hide overlay for inject without clearing renderer session (Apply may need to re-open on fallback). */
 async function hideOverlayForInject(): Promise<void> {
   if (!overlay) return;
+  overlaySessionOpen = false;
   if (overlay.isVisible()) {
     overlay.setOpacity(0);
     overlay.hide();
@@ -216,9 +221,8 @@ async function finalizeOverlayAfterInject(): Promise<void> {
 async function revealOverlayAfterInjectFallback(): Promise<void> {
   if (!overlay) return;
   revealOverlay();
-  overlay.webContents.invalidate();
-  await sleep(16);
   overlay.setOpacity(1);
+  overlaySessionOpen = true;
 }
 
 /** Prime hidden framebuffer to blank session state (matches first hotkey after reload). */
@@ -233,7 +237,11 @@ async function primeOverlayBuffer(): Promise<void> {
   const prepared = waitForOverlayPrepared();
   overlay.webContents.send(IPC.OVERLAY_CLEAR);
   await prepared;
+  positionOverlay();
   overlay.setOpacity(0);
+  if (!overlay.isVisible()) {
+    overlay.showInactive();
+  }
 }
 
 function sendStudioRoute(route: string): void {
@@ -256,36 +264,88 @@ function ensureStudio(route?: "settings"): void {
 async function waitForWindowsHidden(maxMs = 80, intervalMs = 10): Promise<void> {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
-    if (BrowserWindow.getAllWindows().every((w) => !w.isVisible())) return;
+    if (BrowserWindow.getAllWindows().every((w) => w === overlay || !w.isVisible())) return;
     await sleep(intervalMs);
   }
 }
 
 async function hideForCapture(): Promise<void> {
+  if (overlay?.isVisible()) {
+    overlay.setOpacity(0);
+  }
   for (const w of BrowserWindow.getAllWindows()) {
+    if (w === overlay) continue;
     if (w.isVisible()) w.hide();
   }
   await waitForWindowsHidden();
 }
 
+/**
+ * Instant hotkey glass — must run before snapshot/capture in triggerHotkey().
+ *
+ * AGENTS: Do not remove this or move capture ahead of it. Users perceive popup latency
+ * from when glass becomes visible (opacity 1), not when capture finishes. Reverting to
+ * "capture first, then deliverCaptureToOverlay only" regressed UX even when capture
+ * was fast (~100–300ms invisible wait). Empty shell → deliver fills text is intentional.
+ * Keep overlaySessionOpen + resident hideOverlay (no hide()) in sync — see AGENTS.md hotkey flow.
+ * Blur handler must ignore events while hotkeyInFlight or shell closes before capture finishes.
+ */
+async function showOverlayShell(): Promise<void> {
+  if (!overlay) overlay = createOverlay();
+  if (overlay.webContents.isLoading()) {
+    await new Promise<void>((resolve) => {
+      overlay!.webContents.once("did-finish-load", () => resolve());
+    });
+  }
+  revealOverlay();
+  const prepared = waitForOverlayPrepared();
+  overlay.webContents.send(IPC.OVERLAY_SHOW, {
+    text: "",
+    mode: "field",
+    snapshot: { text: "", hasText: false },
+    terminalContext: false,
+  });
+  await prepared;
+  overlay.setOpacity(1);
+  overlaySessionOpen = true;
+}
+
 async function triggerHotkey(): Promise<void> {
   if (hotkeyInFlight || isOptimizing) return;
-  if (overlay && overlay.isVisible()) {
+  if (overlaySessionOpen) {
     await hideOverlay();
     return;
   }
 
   hotkeyInFlight = true;
+  const t0 = isDev ? Date.now() : 0;
   try {
-    await hotkeySnapshot();
+    // Order is load-bearing: prepareCaptureTarget → showOverlayShell → snapshot → capture → deliver.
+    // See showOverlayShell() — do not reorder for "cleaner" single-reveal flow.
     prepareCaptureTarget();
+
+    const tShell = isDev ? Date.now() : 0;
+    await showOverlayShell();
+    if (isDev) console.log(`[PromptForge] overlay shell: ${Date.now() - tShell}ms`);
+
+    const tSnap = isDev ? Date.now() : 0;
+    await hotkeySnapshot();
+    if (isDev) console.log(`[PromptForge] hotkey snapshot: ${Date.now() - tSnap}ms`);
 
     if (!canUseEarlyCaptureFastPath()) {
       await hideForCapture();
     }
 
+    const tCap = isDev ? Date.now() : 0;
     const capture = await captureSelection();
+    if (isDev) console.log(`[PromptForge] capture: ${Date.now() - tCap}ms`);
+
+    const tDeliver = isDev ? Date.now() : 0;
     await deliverCaptureToOverlay(capture);
+    if (isDev) {
+      console.log(`[PromptForge] deliver: ${Date.now() - tDeliver}ms`);
+      console.log(`[PromptForge] hotkey total: ${Date.now() - t0}ms`);
+    }
   } finally {
     hotkeyInFlight = false;
   }
@@ -339,14 +399,13 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.CAPTURE_INJECT, async (_evt, text: string, snapshot: { text: string; hasText: boolean }) => {
     const snap = snapshot || pendingCapture?.snapshot || { text: "", hasText: false };
-    if (pendingCapture?.mode === "terminal") {
-      await copyToClipboard(text, snap);
-      await hideOverlay();
-      return "copied" as const;
-    }
-    // Hide overlay first so it does not steal focus; keep renderer state for clipboard fallback.
     await hideOverlayForInject();
-    await sleep(250);
+    const injectHwnd = getFrozenInjectHwnd();
+    if (injectHwnd) {
+      await waitUntilForeground(injectHwnd);
+      // Let the target app restore internal focus (terminal pane) after overlay hide.
+      await sleep(200);
+    }
     const res = await injectText(text, snap);
     if (res === "injected") {
       await finalizeOverlayAfterInject();
@@ -399,6 +458,13 @@ function registerIpc(): void {
   });
   ipcMain.on(IPC.OVERLAY_PREPARED, () => {
     overlayPreparedResolve?.();
+  });
+
+  ipcMain.handle(IPC.OVERLAY_PLACEMENT_SET, (_evt, placement: OverlayPlacement) => {
+    if (!isOverlayPlacement(placement)) return false;
+    store.setSettings({ ...store.getSettings(), overlayPlacement: placement });
+    positionOverlay();
+    return true;
   });
   ipcMain.on(IPC.STUDIO_SHOW, () => ensureStudio());
   ipcMain.on(IPC.STUDIO_SETTINGS, () => ensureStudio("settings"));

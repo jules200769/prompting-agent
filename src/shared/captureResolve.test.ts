@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveCaptureResult } from "./captureResolve";
+import { pickResolvedCaptureText, resolveCaptureResult } from "./captureResolve";
 
 describe("resolveCaptureResult", () => {
   it("prefers Ctrl+C selection when clipboard changed", () => {
@@ -36,5 +36,24 @@ describe("resolveCaptureResult", () => {
       afterSelectAllCopy: "",
     });
     expect(result).toEqual({ text: "", mode: "empty" });
+  });
+});
+
+describe("pickResolvedCaptureText", () => {
+  const noise =
+    "Terminal 30, powershell Run the command: Toggle Screen Reader Accessibility Mode for an optimized screen reader experience";
+  const title = "apply_inject_flow_hq_3ca28c90.plan.md - prompt-master - Cursor";
+
+  it("returns field text only when mode is field", () => {
+    expect(pickResolvedCaptureText({ mode: "field", text: "npm run build" }, noise)).toBe("npm run build");
+  });
+
+  it("does not fall back to raw script output when mode is empty", () => {
+    expect(pickResolvedCaptureText({ mode: "empty", text: "" }, noise)).toBe("");
+    expect(pickResolvedCaptureText({ mode: "empty", text: "" }, title)).toBe("");
+  });
+
+  it("does not fall back to raw script output when mode is terminal without resolved text", () => {
+    expect(pickResolvedCaptureText({ mode: "terminal", text: "" }, noise)).toBe("");
   });
 });

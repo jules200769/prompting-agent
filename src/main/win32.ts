@@ -21,3 +21,15 @@ export function normalizeHwnd(h: number): number {
   if (!Number.isFinite(h) || h <= 0) return 0;
   return h >>> 0;
 }
+
+const ASFW_ANY = 0xffffffff;
+const AllowSetForegroundWindow = user32.func("bool __stdcall AllowSetForegroundWindow(uint32 dwProcessId)");
+
+/** Let the OS allow our process to restore foreground to the capture target. */
+export function allowSetForeground(): void {
+  try {
+    AllowSetForegroundWindow(ASFW_ANY);
+  } catch {
+    /* non-fatal on older Windows builds */
+  }
+}

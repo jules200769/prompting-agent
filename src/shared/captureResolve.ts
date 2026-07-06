@@ -25,3 +25,12 @@ export function resolveCaptureResult(input: CaptureResolveInput): CaptureResolve
   }
   return { text: "", mode: "empty" };
 }
+
+/** Use finalized capture text for overlay — never fall back to raw script output when filtered empty. */
+export function pickResolvedCaptureText(
+  resolved: CaptureResolveResult | { mode: CaptureMode; text: string },
+  _rawFallback: string,
+): string {
+  if (resolved.mode === "field") return resolved.text;
+  return "";
+}

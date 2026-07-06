@@ -1,15 +1,24 @@
 import type { CaptureMode } from "./types";
-import { isTerminalAccessibilityNoise, isTerminalCaptureContext } from "./terminalDetect";
+import { isTerminalCaptureContext, isCaptureNoiseText } from "./terminalDetect";
 
 /** Pure helper mirroring terminal capture mode resolution in capture.ts. */
 export function resolveTerminalCaptureMode(selectionText: string | null | undefined): CaptureMode {
   return selectionText?.trim() ? "terminal" : "empty";
 }
 
+/** Screen coordinates of the resolved terminal pane (from UIA BoundingRectangle). */
+export interface TerminalBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export interface TerminalSnapshotContext {
   className?: string;
   process?: string;
   focusedIsTerminalPane?: boolean;
+  terminalBounds?: TerminalBounds;
 }
 
 export interface TerminalCaptureResolution {
@@ -39,6 +48,37 @@ const TERMINAL_BUFFER_MARKERS = [
   /https:\/\/aka\.ms\/PSWindows/i,
 ];
 
+const TERMINAL_BANNER_LINE_PATTERNS: RegExp[] = [
+  /^Windows PowerShell$/i,
+  /Copyright \(C\) Microsoft Corporation/i,
+  /Install the latest PowerShell/i,
+  /https:\/\/aka\.ms\/PSWindows/i,
+];
+
+function isBannerLine(line: string): boolean {
+  const t = trimTerminalLine(line).trim();
+  if (!t) return false;
+  return TERMINAL_BANNER_LINE_PATTERNS.some((re) => re.test(t));
+}
+
+/** Strip fixed-width padding and leading PowerShell startup banner lines. */
+function stripTerminalBanner(lines: string[]): string[] {
+  let start = 0;
+  while (start < lines.length) {
+    const line = lines[start];
+    if (isBannerLine(line)) {
+      start++;
+      continue;
+    }
+    if (!trimTerminalLine(line).trim()) {
+      start++;
+      continue;
+    }
+    break;
+  }
+  return lines.slice(start);
+}
+
 /** Whether captured text looks like a full console buffer rather than a deliberate selection. */
 export function isTerminalBufferDump(text: string): boolean {
   return TERMINAL_BUFFER_MARKERS.some((re) => re.test(text));
@@ -52,39 +92,52 @@ export function isLikelyFullConsoleBuffer(text: string): boolean {
 }
 
 /**
- * Extract user input from terminal capture text.
- * Handles full-buffer reads (PowerShell banner + prompt line) and plain selections.
+ * Extract meaningful terminal context from capture text.
+ * Keeps scrollback output and the current prompt line; strips startup banners and a11y noise.
  */
 export function extractTerminalInput(text: string): string | null {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const trimmed = normalized.trim();
   if (!trimmed) return null;
+  if (isCaptureNoiseText(trimmed)) return null;
 
   const lines = normalized.split("\n").map(trimTerminalLine);
+  const contentLines = stripTerminalBanner(lines);
+  const nonEmpty = contentLines.filter((l) => l.trim());
 
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line.trim()) continue;
+  if (nonEmpty.length === 0) return null;
+
+  const joined = contentLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!joined) return null;
+
+  // Single non-prompt line (plain selection or typed command).
+  if (nonEmpty.length === 1) {
+    const only = nonEmpty[0].trim();
     for (const pattern of SHELL_PROMPT_PATTERNS) {
-      const match = line.match(pattern);
+      const match = only.match(pattern);
       if (match) {
         const input = (match[1] ?? "").trim();
-        if (input) return input;
-        if (isTerminalBufferDump(trimmed) || lines.filter((l) => l.trim()).length > 1) return null;
-        continue;
+        return input ? only : null;
       }
+    }
+    return only;
+  }
+
+  // Multi-line: keep full context (output + prompts). Trim trailing empty prompt-only line.
+  const lastNonEmpty = nonEmpty[nonEmpty.length - 1];
+  for (const pattern of SHELL_PROMPT_PATTERNS) {
+    const match = lastNonEmpty.match(pattern);
+    if (match && !(match[1] ?? "").trim() && nonEmpty.length > 1) {
+      const withoutEmptyPrompt = contentLines
+        .slice(0, contentLines.lastIndexOf(lastNonEmpty))
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+      return withoutEmptyPrompt || null;
     }
   }
 
-  if (isTerminalBufferDump(trimmed)) return null;
-
-  const nonEmptyLines = lines.filter((l) => l.trim());
-  if (nonEmptyLines.length === 1) return nonEmptyLines[0].trim() || null;
-
-  // Multi-line deliberate selection (not a console buffer banner read).
-  if (!isLikelyFullConsoleBuffer(trimmed)) return trimmed;
-
-  return null;
+  return joined;
 }
 
 /** Normalize raw capture text into terminal or field mode (used on every capture path). */
@@ -98,7 +151,7 @@ export function resolveCaptureFromPossibleTerminal(
     isTerminalBufferDump(trimmed) ||
     isLikelyFullConsoleBuffer(trimmed);
 
-  if (!trimmed || isTerminalAccessibilityNoise(trimmed)) {
+  if (!trimmed || isCaptureNoiseText(trimmed)) {
     return { text: "", mode: "empty", terminalContext };
   }
 

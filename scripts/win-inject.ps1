@@ -7,7 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
+. "$PSScriptRoot\terminal-io.ps1"
 . "$PSScriptRoot\uia-write-meta.ps1"
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -19,6 +19,7 @@ public static class WinInject {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
@@ -26,12 +27,16 @@ public static class WinInject {
   [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, IntPtr dwExtraInfo);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
   public const uint KEYEVENTF_KEYUP = 0x0002;
   public const uint KEYEVENTF_UNICODE = 0x0004;
   public const uint INPUT_KEYBOARD = 1;
   public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
   public const uint MOUSEEVENTF_LEFTUP = 0x0004;
+  public const uint WM_GETOBJECT = 0x003D;
+  public const int OBJID_CLIENT = unchecked((int)0xFFFFFFFC);
 
   [StructLayout(LayoutKind.Sequential)]
   public struct INPUT {
@@ -75,13 +80,9 @@ public static class WinInject {
 
   public static void Click(int x, int y) {
     SetCursorPos(x, y);
-    StartSleep(30);
+    System.Threading.Thread.Sleep(30);
     mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
     mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
-  }
-
-  private static void StartSleep(int ms) {
-    System.Threading.Thread.Sleep(ms);
   }
 
   public static void SendCtrlCombo(byte keyVk) {
@@ -89,6 +90,22 @@ public static class WinInject {
     keybd_event(keyVk, 0, 0, UIntPtr.Zero);
     keybd_event(keyVk, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
     keybd_event(0x11, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+  }
+
+  public static void SendCtrlShiftCombo(byte keyVk) {
+    keybd_event(0x11, 0, 0, UIntPtr.Zero);
+    keybd_event(0x10, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+    keybd_event(0x10, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+    keybd_event(0x11, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+  }
+
+  public static void SendShiftCombo(byte keyVk) {
+    keybd_event(0x10, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+    keybd_event(0x10, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
   }
 
   public static void SendKey(byte keyVk) {
@@ -120,6 +137,13 @@ public static class WinInject {
       }
     }
   }
+
+  public static void ActivateChromiumAccessibility(IntPtr top) {
+    IntPtr render = FindWindowEx(top, IntPtr.Zero, "Chrome_RenderWidgetHostHWND1", null);
+    if (render != IntPtr.Zero) {
+      SendMessage(render, WM_GETOBJECT, IntPtr.Zero, new IntPtr(OBJID_CLIENT));
+    }
+  }
 }
 '@ -ErrorAction SilentlyContinue
 
@@ -130,15 +154,32 @@ if (-not [string]::IsNullOrEmpty($MetaPath) -and (Test-Path -LiteralPath $MetaPa
   $meta = Get-Content -LiteralPath $MetaPath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
-# Chrome/Edge/Brave and all Electron apps (Cursor, ChatGPT desktop) share the
-# "Chrome_WidgetWin" top-level class. Chromium web fields ignore UIA
-# ValuePattern.SetValue, so treat them all as rich editors and use the single
-# clipboard-paste path Cursor already uses — no ValuePattern/Unicode cascade.
 $script:IsChromiumHost = $false
+$topCls = ""
 try {
   $topCls = [System.Windows.Automation.AutomationElement]::FromHandle($top).Current.ClassName
   if ($topCls -match "Chrome_WidgetWin") { $script:IsChromiumHost = $true }
 } catch {}
+if ($meta -and $meta.topClassName -match "Chrome_WidgetWin") {
+  $script:IsChromiumHost = $true
+  $topCls = $meta.topClassName
+}
+
+# Safety gate: if the frozen capture target is no longer a live window (source closed
+# between capture and Apply), refuse to inject rather than falling back to whatever is
+# focused — that would land refined text in the wrong window. Node then keeps the refined
+# text on the clipboard. A live window (incl. non-foreground / Chromium) is never rejected.
+if (-not [WinInject]::IsWindow($top)) {
+  Write-Output "PF_INJECT_FAIL=deadTarget"
+  exit 1
+}
+
+function Normalize-InjectText([string]$value) {
+  if ($null -eq $value) { return "" }
+  $norm = $value -replace "`r`n", "`n"
+  $norm = $norm -replace "[\u200B-\u200D\uFEFF]", ""
+  return $norm.TrimEnd()
+}
 
 function Get-ElementTextValue($el) {
   if ($null -eq $el) { return $null }
@@ -155,33 +196,53 @@ function Get-ElementTextValue($el) {
 
 function Test-TextMatch([string]$read, [string]$expected, $el) {
   if ($null -eq $read) { return $false }
-  $r = $read.TrimEnd()
-  $e = $expected.TrimEnd()
-  if ($r -eq $e) { return $true }
-  if ($e.Length -ge 8 -and $r.StartsWith($e.Substring(0, [Math]::Min(40, $e.Length)))) { return $true }
+  $r = Normalize-InjectText $read
+  $e = Normalize-InjectText $expected
+  if ($r -eq $e) { return "full" }
+  if ($e.Length -gt 2048) {
+    $prefixLen = [Math]::Min(200, $e.Length)
+    $suffixLen = [Math]::Min(100, $e.Length)
+    $prefix = $e.Substring(0, $prefixLen)
+    $suffix = $e.Substring($e.Length - $suffixLen)
+    if ($r.StartsWith($prefix) -and $r.EndsWith($suffix)) { return "partial" }
+    if ($r.Contains($prefix) -and $r.Contains($suffix)) { return "partial" }
+    return $false
+  }
+  if ($e.Length -ge 8 -and $r.StartsWith($e.Substring(0, [Math]::Min(40, $e.Length)))) { return "partial" }
   if ($null -ne $el -and (Test-IsRichTextEditor $el)) {
-    $rNorm = $r -replace "`r`n", "`n"
-    $eNorm = $e -replace "`r`n", "`n"
-    if ($rNorm -eq $eNorm) { return $true }
-    if ($eNorm.Length -ge 12 -and $rNorm.Contains($eNorm.Substring(0, [Math]::Min(80, $eNorm.Length)))) { return $true }
+    if ($e.Length -ge 12 -and $r.Contains($e.Substring(0, [Math]::Min(80, $e.Length)))) { return "partial" }
   }
   return $false
 }
 
 function Clear-TextSelection([IntPtr]$top) {
   Start-Sleep -Milliseconds 40
-  [WinInject]::WithTargetInput($top, { [WinInject]::SendKey(0x23) }) # End — cursor naar einde, deselect
+  [WinInject]::WithTargetInput($top, { [WinInject]::SendKey(0x23) })
 }
 
-function Complete-Inject([string]$method, [IntPtr]$top) {
+function Complete-Inject([string]$method, [string]$verifyMode, [IntPtr]$top) {
   Clear-TextSelection $top
+  Write-Output "PF_INJECT_VERIFY=$verifyMode"
   Write-Output "PF_INJECT_OK=$method"
   exit 0
 }
 
+function Complete-TerminalInject([string]$method, [string]$verifyMode) {
+  Write-Output "PF_INJECT_VERIFY=$verifyMode"
+  Write-Output "PF_INJECT_OK=$method"
+  exit 0
+}
+
+function Get-VerifyPollCount([string]$expected) {
+  $extra = [Math]::Min(10, [int]($expected.Length / 500))
+  return [Math]::Min(16, 4 + $extra)
+}
+
 function Wait-TextMatch($el, [string]$expected) {
-  for ($i = 0; $i -lt 6; $i++) {
-    if (Test-TextMatch (Get-ElementTextValue $el) $expected $el) { return $true }
+  $polls = Get-VerifyPollCount $expected
+  for ($i = 0; $i -lt $polls; $i++) {
+    $mode = Test-TextMatch (Get-ElementTextValue $el) $expected $el
+    if ($mode) { return $mode }
     Start-Sleep -Milliseconds 100
   }
   return $false
@@ -259,7 +320,7 @@ function Click-Bounds($bounds) {
   $y = [int](($bounds.top + $bounds.bottom) / 2)
   if ($x -gt 0 -and $y -gt 0) {
     [WinInject]::Click($x, $y)
-    Start-Sleep -Milliseconds 200
+    Start-Sleep -Milliseconds 150
   }
 }
 
@@ -290,15 +351,22 @@ function Resolve-TargetElement($meta, [IntPtr]$top) {
   return $focused
 }
 
-function Invoke-KeyboardReplace([IntPtr]$top, [string]$value) {
+function Invoke-ClipboardReplace([IntPtr]$top, [string]$value, [int]$settleMs) {
   Set-Clipboard -Value $value
   Start-Sleep -Milliseconds 80
   [WinInject]::WithTargetInput($top, {
-    [WinInject]::SendCtrlCombo(0x41) # A
+    [WinInject]::SendCtrlCombo(0x41)
     Start-Sleep -Milliseconds 80
-    [WinInject]::SendCtrlCombo(0x56) # V
+    [WinInject]::SendCtrlCombo(0x56)
   })
-  Start-Sleep -Milliseconds 150
+  Start-Sleep -Milliseconds $settleMs
+}
+
+function Invoke-ClipboardPasteOnly([IntPtr]$top, [int]$settleMs) {
+  [WinInject]::WithTargetInput($top, {
+    [WinInject]::SendCtrlCombo(0x56)
+  })
+  Start-Sleep -Milliseconds $settleMs
 }
 
 function Try-ValuePatternSet($el, [string]$value, [IntPtr]$top) {
@@ -307,56 +375,16 @@ function Try-ValuePatternSet($el, [string]$value, [IntPtr]$top) {
     $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     if ($vp -and $vp.Current.IsReadOnly -eq $false) {
       $vp.SetValue($value)
-      if (Wait-TextMatch $el $value) {
-        Complete-Inject "valuePattern" $top
+      $mode = Wait-TextMatch $el $value
+      if ($mode) {
+        Complete-Inject "valuePattern" $mode $top
       }
     }
   } catch {}
   return $false
 }
 
-function Try-RichEditorPaste($el, [string]$value, [IntPtr]$top, $bounds) {
-  if (-not (Test-IsRichTextEditor $el)) { return $false }
-  Focus-TargetElement $el $bounds
-  Invoke-ElementFocus $el
-  Set-Clipboard -Value $value
-  Start-Sleep -Milliseconds 80
-  [WinInject]::WithTargetInput($top, {
-    [WinInject]::SendCtrlCombo(0x41) # A — Monaco/Cursor respond better than UIA DocumentRange.Select
-    Start-Sleep -Milliseconds 80
-    [WinInject]::SendCtrlCombo(0x56) # V
-  })
-  Start-Sleep -Milliseconds 200
-  if (Wait-TextMatch $el $value) {
-    Complete-Inject "richEditorPaste" $top
-  }
-  return $false
-}
-
-function Try-TextPatternPaste($el, [string]$value, [IntPtr]$top, $bounds) {
-  try {
-    $tp = $el.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-    if ($null -eq $tp) { return $false }
-    Focus-TargetElement $el $bounds
-    Invoke-ElementFocus $el
-    if (Test-IsRichTextEditor $el) {
-      [WinInject]::WithTargetInput($top, { [WinInject]::SendCtrlCombo(0x41) })
-    } else {
-      $tp.DocumentRange.Select()
-    }
-    Start-Sleep -Milliseconds 80
-    Set-Clipboard -Value $value
-    Start-Sleep -Milliseconds 80
-    [WinInject]::WithTargetInput($top, { [WinInject]::SendCtrlCombo(0x56) })
-    Start-Sleep -Milliseconds 150
-    if (Wait-TextMatch $el $value) {
-      Complete-Inject "textPatternPaste" $top
-    }
-  } catch {}
-  return $false
-}
-
-function Focus-TargetElement($el, $bounds) {
+function Try-ClipboardPaste($el, [string]$value, [IntPtr]$top, [int]$settleMs, [bool]$trustWithoutVerify) {
   if ($null -ne $el) {
     try {
       $rect = $el.Current.BoundingRectangle
@@ -364,59 +392,271 @@ function Focus-TargetElement($el, $bounds) {
       $y = [int](($rect.Top + $rect.Bottom) / 2)
       if ($x -gt 0 -and $y -gt 0) {
         [WinInject]::Click($x, $y)
-        Start-Sleep -Milliseconds 150
+        Start-Sleep -Milliseconds 100
       }
     } catch {}
-  } elseif ($null -ne $bounds) {
-    Click-Bounds $bounds
+    Invoke-ElementFocus $el
   }
+  Invoke-ClipboardReplace $top $value $settleMs
+  $checkEl = $el
+  if ($null -eq $checkEl) { $checkEl = [System.Windows.Automation.AutomationElement]::FocusedElement }
+  $mode = Wait-TextMatch $checkEl $value
+  if ($mode) {
+    Complete-Inject "clipboardPaste" $mode $top
+  }
+  if ($trustWithoutVerify -and $null -ne $checkEl) {
+    Write-Output "PF_INJECT_VERIFY=optimistic"
+    Complete-Inject "clipboardPaste" "optimistic" $top
+  }
+  return $false
 }
 
-function Try-UnicodeType($el, [string]$value, [IntPtr]$top, $bounds) {
-  Focus-TargetElement $el $bounds
+function Try-UnicodeReplace($el, [string]$value, [IntPtr]$top) {
   [WinInject]::WithTargetInput($top, {
-    [WinInject]::SendCtrlCombo(0x41) # A
+    [WinInject]::SendCtrlCombo(0x41)
     Start-Sleep -Milliseconds 80
     [WinInject]::SendUnicodeText($value)
   })
+  Start-Sleep -Milliseconds 200
+  $checkEl = $el
+  if ($null -eq $checkEl) { $checkEl = [System.Windows.Automation.AutomationElement]::FocusedElement }
+  $mode = Wait-TextMatch $checkEl $value
+  if ($mode) {
+    Complete-Inject "unicode" $mode $top
+  }
+  return $false
+}
+
+function Get-TerminalCopiedInputLine([string]$clip) {
+  if ([string]::IsNullOrWhiteSpace($clip)) { return $null }
+  $norm = (Normalize-InjectText $clip).Trim()
+  $lines = $norm -split "`n"
+  for ($i = $lines.Length - 1; $i -ge 0; $i--) {
+    $line = $lines[$i].Trim()
+    if ($line.Length -gt 0) { return $line }
+  }
+  return $norm
+}
+
+function Compare-TerminalInjectText([string]$actual, [string]$expected) {
+  if ($null -eq $actual) { return $false }
+  $line = Get-TerminalCopiedInputLine $actual
+  if ($null -eq $line) { return $false }
+  $e = (Normalize-InjectText $expected).Trim()
+  if ($line -eq $e) { return $true }
+  if ($e.Length -ge 4 -and $line.Contains($e)) { return $true }
+  if ($e.Length -ge 8 -and $line.StartsWith($e.Substring(0, [Math]::Min(40, $e.Length)))) { return $true }
+  if ($e.Length -ge 12 -and $line.Contains($e.Substring(0, [Math]::Min(80, $e.Length)))) { return $true }
+  return $false
+}
+
+function Set-TerminalClipboardText([string]$value) {
+  try {
+    [System.Windows.Forms.Clipboard]::SetText($value)
+  } catch {
+    Set-Clipboard -Value $value
+  }
+  Start-Sleep -Milliseconds 80
+}
+
+function Select-TerminalInputLine([long]$hwnd, [bool]$useConhostCopy, [bool]$useIntegratedCopy) {
+  $selectHomeEnd = {
+    [WinFg]::SendKey(0x24)
+    Start-Sleep -Milliseconds 40
+    [WinFg]::SendShiftCombo(0x23)
+  }
+  $selectCtrlA = {
+    [WinFg]::SendCtrlCombo(0x41)
+  }
+  Invoke-WithTargetKeys $hwnd {
+    if ($useConhostCopy) {
+      & $selectHomeEnd
+    } elseif ($useIntegratedCopy) {
+      & $selectCtrlA
+    } else {
+      & $selectHomeEnd
+    }
+  }
+  Start-Sleep -Milliseconds 60
+}
+
+function Invoke-TerminalPasteOnly([long]$hwnd) {
+  Invoke-WithTargetKeys $hwnd { [WinFg]::SendCtrlCombo(0x56) }
+  Start-Sleep -Milliseconds 120
+}
+
+function Invoke-TerminalCtrlAReplacePaste([long]$hwnd) {
+  Invoke-WithTargetKeys $hwnd {
+    [WinFg]::SendCtrlCombo(0x41)
+    Start-Sleep -Milliseconds 80
+    [WinFg]::SendCtrlCombo(0x56)
+  }
   Start-Sleep -Milliseconds 150
-  $checkEl = $el
-  if ($null -eq $checkEl) { $checkEl = [System.Windows.Automation.AutomationElement]::FocusedElement }
-  if (Wait-TextMatch $checkEl $value) {
-    Complete-Inject "unicode" $top
-  }
-  return $false
 }
 
-function Try-KeyboardReplace($el, [string]$value, [IntPtr]$top, $bounds) {
-  Focus-TargetElement $el $bounds
-  Invoke-KeyboardReplace $top $value
-  $checkEl = $el
-  if ($null -eq $checkEl) { $checkEl = [System.Windows.Automation.AutomationElement]::FocusedElement }
-  if (Wait-TextMatch $checkEl $value) {
-    Complete-Inject "keyboard" $top
+function Invoke-TerminalHomeEndReplacePaste([long]$hwnd) {
+  Invoke-WithTargetKeys $hwnd {
+    [WinFg]::SendKey(0x24)
+    Start-Sleep -Milliseconds 40
+    [WinFg]::SendShiftCombo(0x23)
+    Start-Sleep -Milliseconds 60
+    [WinFg]::SendCtrlCombo(0x56)
   }
-  return $false
+  Start-Sleep -Milliseconds 150
 }
 
-[WinInject]::FocusWindow($top)
-Start-Sleep -Milliseconds 300
+function Invoke-TerminalUnicodeReplace([long]$hwnd, [string]$value, [bool]$useConhostCopy) {
+  Invoke-WithTargetKeys $hwnd {
+    if ($useConhostCopy) {
+      [WinFg]::SendKey(0x24)
+      Start-Sleep -Milliseconds 40
+      [WinFg]::SendShiftCombo(0x23)
+    } else {
+      [WinFg]::SendCtrlCombo(0x41)
+    }
+    Start-Sleep -Milliseconds 80
+    [WinInject]::SendUnicodeText($value)
+  }
+  Start-Sleep -Milliseconds 200
+}
 
-$targetEl = Resolve-TargetElement $meta $top
+function Test-TerminalInjectVerified([long]$hwnd, $el, $bounds, [string]$expected, [bool]$useConhostCopy, [bool]$useIntegratedCopy, [string]$strategy) {
+  $saved = Save-ClipboardText
+  try {
+    try { [System.Windows.Forms.Clipboard]::Clear() } catch { Clear-Clipboard -ErrorAction SilentlyContinue }
+    $actual = Invoke-TerminalPromptLineCopy $hwnd $el $useConhostCopy $useIntegratedCopy $bounds
+    $matched = Compare-TerminalInjectText $actual $expected
+    if (-not $matched) {
+      $actualLen = if ($null -ne $actual) { $actual.Length } else { 0 }
+      Write-Output "PF_INJECT_TERMINAL_VERIFY=$strategy expectedLen=$($expected.Length) actualLen=$actualLen"
+    }
+    return $matched
+  } finally {
+    Restore-ClipboardText $saved
+  }
+}
+
+function Focus-TerminalWithFrozenBounds([long]$hwnd, $el, $bounds, [string]$processName) {
+  Focus-TerminalPane $hwnd $el $bounds $processName
+}
+
+function Try-TerminalPaste([string]$value, [IntPtr]$top, $el, $bounds, [bool]$useConhostCopy, [string]$processName) {
+  $hwnd = $top.ToInt64()
+  $useIntegratedCopy = Test-IsIntegratedTerminalHostByProcess $processName
+  $savedClip = Save-ClipboardText
+  $method = "terminalPaste"
+
+  try {
+    Focus-TerminalWithFrozenBounds $hwnd $el $bounds $processName
+    Set-TerminalClipboardText $value
+    Select-TerminalInputLine $hwnd $useConhostCopy $useIntegratedCopy
+
+    # One paste action — avoid chaining right-click + Ctrl+V (double insert).
+    if (Test-IsTerminalRightClickPasteHost $useIntegratedCopy) {
+      if ($null -ne (Get-NormalizedBounds $bounds)) {
+        [void](Invoke-TerminalRightClickPaste $hwnd $bounds)
+        $method = "terminalRightClickPaste"
+      } else {
+        Invoke-TerminalPasteOnly $hwnd
+      }
+    } else {
+      Invoke-TerminalPasteOnly $hwnd
+    }
+
+    Start-Sleep -Milliseconds 100
+    # Trust paste when focus + clipboard + single keystroke/mouse action succeeded.
+    # Full clipboard readback verify (Ctrl+A + copy) flashes selection and felt like extra mystery steps.
+    Complete-TerminalInject $method "optimistic"
+
+    return $false
+  } finally {
+    Restore-ClipboardText $savedClip
+  }
+}
+
+$hostKind = "native"
+if ($meta -and $meta.hostKind) {
+  $hostKind = [string]$meta.hostKind
+} elseif ($script:IsChromiumHost) {
+  $hostKind = "chromium"
+}
+
+if ($hostKind -ne "terminal") {
+  [WinInject]::FocusWindow($top)
+  Start-Sleep -Milliseconds 200
+
+  if ($script:IsChromiumHost) {
+    [WinInject]::ActivateChromiumAccessibility($top)
+    Start-Sleep -Milliseconds 100
+  }
+}
+
+# Terminal targets skip field-style element resolve (center click + SetFocus can move focus
+# off the terminal input); Try-TerminalPaste owns focus via Focus-TerminalWithFrozenBounds.
+$targetEl = $null
+if ($hostKind -ne "terminal") {
+  $targetEl = Resolve-TargetElement $meta $top
+  if ($null -ne $targetEl -and (Test-IsRichTextEditor $targetEl) -and $hostKind -eq "chromium") {
+    $hostKind = "richEditor"
+  }
+}
+
 $className = if ($null -ne $targetEl) { $targetEl.Current.ClassName } else { "(none)" }
+Write-Output "PF_INJECT_HOST=$hostKind"
 Write-Output "PF_INJECT_TARGET=$className"
 
-if ($null -ne $targetEl) {
-  [void](Try-RichEditorPaste $targetEl $text $top $meta.bounds)
-  [void](Try-ValuePatternSet $targetEl $text $top)
-  [void](Try-TextPatternPaste $targetEl $text $top $meta.bounds)
+$pasteSettleMs = if ($hostKind -eq "richEditor") { 280 } else { 180 }
+$trustChromiumPaste = $script:IsChromiumHost -or $hostKind -eq "chromium" -or $hostKind -eq "richEditor"
+$terminalUseConhostCopy = $false
+if ($meta -and $meta.terminalUseConhostCopy) {
+  $terminalUseConhostCopy = [bool]$meta.terminalUseConhostCopy
+} elseif ($topCls -eq "ConsoleWindowClass") {
+  $terminalUseConhostCopy = $true
 }
 
-# Unicode keystrokes before clipboard paste fallback
-[void](Try-UnicodeType $targetEl $text $top $meta.bounds)
-
-# Reached only when ValuePattern/TextPattern/Unicode were unavailable (not when paste/set already ran)
-[void](Try-KeyboardReplace $targetEl $text $top $meta.bounds)
+switch ($hostKind) {
+  "terminal" {
+    $termBounds = $null
+    if ($meta -and $meta.terminalBounds) { $termBounds = $meta.terminalBounds }
+    elseif ($meta -and $meta.bounds) { $termBounds = $meta.bounds }
+    $termEl = $targetEl
+    if ($null -eq $termEl) {
+      try {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -ne $focused) { $termEl = Resolve-TerminalPaneElement $focused }
+      } catch {}
+    }
+    if ($null -eq $termBounds -and $null -ne $termEl) {
+      $termBounds = Get-TerminalPaneBoundsFromElement $termEl
+    }
+    $termProcess = if ($meta -and $meta.processName) { [string]$meta.processName } else { "" }
+    if ([string]::IsNullOrWhiteSpace($termProcess)) {
+      $termProcess = Get-WindowProcessName $top.ToInt64()
+    }
+    $boundsTag = if ($null -ne (Get-NormalizedBounds $termBounds)) { "yes" } else { "no" }
+    Write-Output "PF_INJECT_TERMINAL_META=process=$termProcess bounds=$boundsTag conhost=$terminalUseConhostCopy"
+    Try-TerminalPaste $text $top $termEl $termBounds $terminalUseConhostCopy $termProcess
+  }
+  "native" {
+    if ($null -ne $targetEl) {
+      [void](Try-ValuePatternSet $targetEl $text $top)
+    }
+    [void](Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $false)
+    [void](Try-UnicodeReplace $targetEl $text $top)
+  }
+  "chromium" {
+    [void](Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste)
+    [void](Try-UnicodeReplace $targetEl $text $top)
+  }
+  "richEditor" {
+    [void](Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste)
+    [void](Try-UnicodeReplace $targetEl $text $top)
+  }
+  default {
+    [void](Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste)
+    [void](Try-UnicodeReplace $targetEl $text $top)
+  }
+}
 
 Write-Output "PF_INJECT_FAIL=all_methods"
 exit 1

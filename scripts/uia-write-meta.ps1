@@ -1,3 +1,5 @@
+. "$PSScriptRoot\inject-strategy.ps1"
+
 function Write-UiaMetaJson([string]$Path, $MetaObject) {
   $json = $MetaObject | ConvertTo-Json -Compress -Depth 6
   $enc = New-Object System.Text.UTF8Encoding $false
@@ -20,7 +22,15 @@ function New-UiaMetaObject($el, [string]$method) {
   }
 }
 
-function Write-ElementMeta($el, [string]$method, [string]$path) {
+function Write-ElementMeta($el, [string]$method, [string]$path, [string]$TopClassName = "", [string]$ProcessName = "") {
   if ([string]::IsNullOrEmpty($path) -or $null -eq $el) { return }
-  Write-UiaMetaJson $path (New-UiaMetaObject $el $method)
+  $meta = New-UiaMetaObject $el $method
+  if (-not [string]::IsNullOrEmpty($TopClassName)) {
+    $meta.hostKind = Get-HostKind $TopClassName $meta.className $meta.controlType
+    $meta.topClassName = $TopClassName
+  }
+  if (-not [string]::IsNullOrEmpty($ProcessName)) {
+    $meta.processName = $ProcessName
+  }
+  Write-UiaMetaJson $path $meta
 }

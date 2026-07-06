@@ -5,7 +5,7 @@ const keyGet = vi.fn<() => Promise<string | null>>();
 const optimizeStream = vi.fn();
 
 vi.mock("../main/keyStore", () => ({
-  keyStore: { get: (...args: unknown[]) => keyGet(...args) },
+  keyStore: { get: keyGet },
 }));
 
 vi.mock("./providers", () => ({
@@ -57,5 +57,17 @@ describe("optimize orchestrator", () => {
     const res = await optimize({ request: req, onText: () => {} });
     expect(res.source).toBe("llm");
     expect(res.optimizedPrompt).toContain("Refined prompt text");
+  });
+
+  it("collapses terminal rewrite output to a single line", async () => {
+    keyGet.mockResolvedValue("sk-test");
+    optimizeStream.mockResolvedValue({ text: "line one\nline two" });
+    const { optimize } = await import("./orchestrator");
+    const res = await optimize({
+      request: { ...req, terminalContext: true },
+      onText: () => {},
+    });
+    expect(res.optimizedPrompt).toBe("line one line two");
+    expect(res.optimizedPrompt).not.toMatch(/\n/);
   });
 });

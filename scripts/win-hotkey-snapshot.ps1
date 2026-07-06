@@ -1,14 +1,25 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$MetaPath,
-  [string]$TextPath = ""
+  [string]$TextPath = "",
+  [long]$TargetHwnd = 0
 )
 
 $ErrorActionPreference = "Stop"
+# AGENTS: terminal-io.ps1 OWNS the shared `WinFg` C# class (full superset). Dot-sourcing it here
+# means the local WinFg Add-Type below MUST stay behind its `if (-not [PSTypeName]'WinFg'.Type)`
+# guard. Do not remove the guard and do not add a second unguarded `Add-Type ... class WinFg`,
+# or the snapshot dies with TYPE_ALREADY_EXISTS → slow win-capture.ps1 fallback (laggy popup).
+. "$PSScriptRoot\terminal-io.ps1"
 . "$PSScriptRoot\uia-write-meta.ps1"
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
 
+# WinFg is already defined by terminal-io.ps1 (dot-sourced above). Guard against re-adding it —
+# a duplicate Add-Type throws TYPE_ALREADY_EXISTS under $ErrorActionPreference='Stop', which
+# crashed the snapshot and forced the slow win-capture.ps1 fallback (popup felt slow/reopened).
+if (-not ([System.Management.Automation.PSTypeName]'WinFg').Type) {
 Add-Type -Language CSharp -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -16,20 +27,63 @@ using System.Text;
 public static class WinFg {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
   [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, IntPtr dwExtraInfo);
+  public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+  public const uint MOUSEEVENTF_LEFTUP = 0x0004;
   public static void FocusWindow(IntPtr hWnd) {
     IntPtr fg = GetForegroundWindow();
-    uint fgThread = GetWindowThreadProcessId(fg, out _);
-    uint targetThread = GetWindowThreadProcessId(hWnd, out _);
+    uint fgThread = GetWindowThreadProcessId(fg, IntPtr.Zero);
+    uint targetThread = GetWindowThreadProcessId(hWnd, IntPtr.Zero);
     if (fgThread != targetThread) AttachThreadInput(fgThread, targetThread, true);
     if (IsIconic(hWnd)) ShowWindow(hWnd, 9);
     SetForegroundWindow(hWnd);
     if (fgThread != targetThread) AttachThreadInput(fgThread, targetThread, false);
+  }
+  public static void WithTargetInput(IntPtr topLevel, Action action) {
+    IntPtr fg = GetForegroundWindow();
+    uint fgThread = GetWindowThreadProcessId(fg, IntPtr.Zero);
+    uint targetThread = GetWindowThreadProcessId(topLevel, IntPtr.Zero);
+    bool attached = false;
+    if (fgThread != targetThread) {
+      AttachThreadInput(fgThread, targetThread, true);
+      attached = true;
+    }
+    try { action(); }
+    finally {
+      if (attached) AttachThreadInput(fgThread, targetThread, false);
+    }
+  }
+  public static void Click(int x, int y) {
+    SetCursorPos(x, y);
+    System.Threading.Thread.Sleep(30);
+    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, IntPtr.Zero);
+    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, IntPtr.Zero);
+  }
+  public static void SendKey(byte keyVk) {
+    const uint KEYUP = 0x0002;
+    keybd_event(keyVk, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, KEYUP, UIntPtr.Zero);
+  }
+  public static void SendShiftCombo(byte keyVk) {
+    const uint KEYUP = 0x0002;
+    keybd_event(0x10, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, KEYUP, UIntPtr.Zero);
+    keybd_event(0x10, 0, KEYUP, UIntPtr.Zero);
+  }
+  public static void SendCtrlCombo(byte keyVk) {
+    const uint KEYUP = 0x0002;
+    keybd_event(0x11, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, 0, UIntPtr.Zero);
+    keybd_event(keyVk, 0, KEYUP, UIntPtr.Zero);
+    keybd_event(0x11, 0, KEYUP, UIntPtr.Zero);
   }
   public static void SendCtrlShiftCombo(byte keyVk) {
     const uint KEYUP = 0x0002;
@@ -40,15 +94,31 @@ public static class WinFg {
     keybd_event(0x10, 0, KEYUP, UIntPtr.Zero);
     keybd_event(0x11, 0, KEYUP, UIntPtr.Zero);
   }
-  public static void SendCtrlCombo(byte keyVk) {
-    const uint KEYUP = 0x0002;
-    keybd_event(0x11, 0, 0, UIntPtr.Zero);
-    keybd_event(keyVk, 0, 0, UIntPtr.Zero);
-    keybd_event(keyVk, 0, KEYUP, UIntPtr.Zero);
-    keybd_event(0x11, 0, KEYUP, UIntPtr.Zero);
-  }
 }
 '@ -ErrorAction SilentlyContinue
+}
+
+function Get-WindowInfo([long]$hwnd) {
+  $className = ""
+  $processName = ""
+  try {
+    $sb = New-Object System.Text.StringBuilder 256
+    [void][WinFg]::GetClassName([IntPtr]::new($hwnd), $sb, $sb.Capacity)
+    $className = $sb.ToString()
+  } catch {}
+  try {
+    $winPid = [uint32]0
+    [void][WinFg]::GetWindowThreadProcessId([IntPtr]::new($hwnd), [ref]$winPid)
+    if ($winPid -gt 0) {
+      $processName = (Get-Process -Id $winPid -ErrorAction SilentlyContinue).ProcessName
+    }
+  } catch {}
+  return @{
+    Hwnd        = $hwnd
+    ClassName   = $className
+    ProcessName = $processName
+  }
+}
 
 function Get-ForegroundWindowInfo {
   $hwnd = [WinFg]::GetForegroundWindow()
@@ -60,10 +130,10 @@ function Get-ForegroundWindowInfo {
     $className = $sb.ToString()
   } catch {}
   try {
-    $pid = [uint32]0
-    [void][WinFg]::GetWindowThreadProcessId($hwnd, [ref]$pid)
-    if ($pid -gt 0) {
-      $processName = (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName
+    $winPid = [uint32]0
+    [void][WinFg]::GetWindowThreadProcessId($hwnd, [ref]$winPid)
+    if ($winPid -gt 0) {
+      $processName = (Get-Process -Id $winPid -ErrorAction SilentlyContinue).ProcessName
     }
   } catch {}
   return @{
@@ -99,8 +169,21 @@ function Test-IsTerminalAccessibilityNoise([string]$text) {
   if ([string]::IsNullOrEmpty($text)) { return $false }
   if ($text -match '(?i)Toggle Screen Reader Accessibility Mode') { return $true }
   if ($text -match '(?i)Alt\+F1 for terminal accessibility help') { return $true }
-  if ($text -match '(?i)^Terminal \d+,?\s*(powershell|pwsh|cmd|bash|zsh|wsl|sh)\b') { return $true }
+  if ($text -match '(?i)Run the command:') { return $true }
+  if ($text -match '(?i)Terminal \d+,?\s*(powershell|pwsh|cmd|bash|zsh|wsl|sh)\b') { return $true }
   return $false
+}
+
+function Test-IsIdeWindowTitleNoise([string]$text) {
+  if ([string]::IsNullOrEmpty($text)) { return $false }
+  if ($text -match '(?i)\s-\s.+?\s-\s(Cursor|Visual Studio Code)\s*$') { return $true }
+  if ($text -match '(?i)\s-\s.+\s-\sCode\s*$') { return $true }
+  if ($text -match '(?i)\s-\sCursor\s*$') { return $true }
+  return $false
+}
+
+function Test-IsCaptureNoise([string]$text) {
+  return (Test-IsTerminalAccessibilityNoise $text) -or (Test-IsIdeWindowTitleNoise $text)
 }
 
 function Test-IsTerminalBufferDump([string]$text) {
@@ -138,6 +221,25 @@ function Test-FocusedElementIsTerminalPane($el) {
   return $false
 }
 
+function Test-ElementHasTerminalAncestor($el) {
+  if ($null -eq $el) { return $false }
+  $cur = $el
+  for ($i = 0; $i -lt 12 -and $null -ne $cur; $i++) {
+    if ((Test-FocusedElementIsTerminalPane $cur) -or (Test-FocusedElementIsConsolePane $cur)) {
+      return $true
+    }
+    try { $cur = $cur.GetParent() } catch { break }
+  }
+  return $false
+}
+
+function Resolve-FocusedIsTerminalPane($el, [string]$processName) {
+  if ($null -eq $el) { return $false }
+  if ((Test-FocusedElementIsTerminalPane $el) -or (Test-FocusedElementIsConsolePane $el)) { return $true }
+  if ((Test-IsIntegratedTerminalHost $processName) -and (Test-ElementHasTerminalAncestor $el)) { return $true }
+  return $false
+}
+
 function Get-ElementText($el) {
   if ($null -eq $el) { return $null }
   $text = $null
@@ -152,8 +254,23 @@ function Get-ElementText($el) {
     } catch {}
   }
   if ([string]::IsNullOrEmpty($text)) { return $null }
-  if (Test-IsTerminalAccessibilityNoise $text) { return $null }
+  if (Test-IsCaptureNoise $text) { return $null }
   return $text
+}
+
+function Test-IsUsableCaptureText([string]$text) {
+  if ([string]::IsNullOrEmpty($text)) { return $false }
+  if (Test-IsCaptureNoise $text) { return $false }
+  # Buffer dumps are normalized in TypeScript — keep scrollback context.
+  return $true
+}
+
+function Write-CaptureTextPath([string]$text, [string]$path) {
+  if (-not (Test-IsUsableCaptureText $text)) { return $false }
+  if ([string]::IsNullOrEmpty($path)) { return $true }
+  $enc = New-Object System.Text.UTF8Encoding $false
+  [System.IO.File]::WriteAllText($path, $text, $enc)
+  return $true
 }
 
 function Get-ElementSelectionText($el) {
@@ -172,20 +289,9 @@ function Get-ElementSelectionText($el) {
     }
     if ($parts.Count -eq 0) { return $null }
     $joined = ($parts -join "")
-    if (Test-IsTerminalAccessibilityNoise $joined) { return $null }
-    if (Test-IsTerminalBufferDump $joined) { return $null }
+    if (-not (Test-IsUsableCaptureText $joined)) { return $null }
     return $joined
   } catch {}
-  return $null
-}
-
-function Wait-ClipboardText([int]$timeoutMs = 400, [int]$intervalMs = 50) {
-  $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
-  while ([DateTime]::UtcNow -lt $deadline) {
-    $clip = Get-Clipboard -Raw -ErrorAction SilentlyContinue
-    if (-not [string]::IsNullOrEmpty($clip)) { return $clip }
-    Start-Sleep -Milliseconds $intervalMs
-  }
   return $null
 }
 
@@ -196,37 +302,44 @@ function Get-ElementDocumentText($el) {
     if ($null -eq $tp) { return $null }
     $text = $tp.DocumentRange.GetText(1000000)
     if ([string]::IsNullOrEmpty($text)) { return $null }
-    if (Test-IsTerminalAccessibilityNoise $text) { return $null }
+    if (Test-IsCaptureNoise $text) { return $null }
     return $text
   } catch {}
   return $null
 }
 
-function Invoke-TerminalSelectionCopy([long]$hwnd, [bool]$useConhostCopy) {
-  $saved = Get-Clipboard -Raw -ErrorAction SilentlyContinue
-  Clear-Clipboard -ErrorAction SilentlyContinue
+function Test-IsTerminalPaneCandidate($el) {
+  if ($null -eq $el) { return $false }
+  if ((Test-FocusedElementIsTerminalPane $el) -or (Test-FocusedElementIsConsolePane $el)) { return $true }
+  if (Test-TerminalPaneElement $el) { return $true }
+  return $false
+}
+
+function Find-TerminalPaneInSubtree($el, [int]$depth, [int]$maxDepth) {
+  if ($null -eq $el -or $depth -gt $maxDepth) { return $null }
+  if (Test-IsTerminalPaneCandidate $el) { return $el }
   try {
-    [WinFg]::FocusWindow([IntPtr]::new($hwnd))
-    Start-Sleep -Milliseconds 80
-    if ($useConhostCopy) {
-      [WinFg]::SendCtrlCombo(0x43)
-    } else {
-      [WinFg]::SendCtrlShiftCombo(0x43)
+    $children = $el.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+    foreach ($child in $children) {
+      $found = Find-TerminalPaneInSubtree $child ($depth + 1) $maxDepth
+      if ($null -ne $found) { return $found }
     }
-    $clip = Wait-ClipboardText 500 50
-    if ([string]::IsNullOrEmpty($clip)) { return $null }
-    if (Test-IsTerminalAccessibilityNoise $clip) { return $null }
-    if (Test-IsTerminalBufferDump $clip) { return $null }
-    return $clip
-  } finally {
-    if ($saved) { Set-Clipboard -Value $saved -ErrorAction SilentlyContinue }
-    else { Clear-Clipboard -ErrorAction SilentlyContinue }
-  }
+  } catch {}
+  return $null
+}
+
+function Find-TerminalPaneInWindow([long]$hwnd) {
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($hwnd))
+    if ($null -eq $root) { return $null }
+    return Find-TerminalPaneInSubtree $root 0 14
+  } catch {}
+  return $null
 }
 
 function Test-IsTextControl($el) {
   if ($null -eq $el) { return $false }
-  if (Test-FocusedElementIsTerminalPane $el) { return $false }
+  if ((Test-FocusedElementIsTerminalPane $el) -or (Test-ElementHasTerminalAncestor $el)) { return $false }
   try {
     $ct = $el.Current.ControlType.ProgrammaticName
     if ($ct -eq "ControlType.Edit" -or $ct -eq "ControlType.Document") { return $true }
@@ -246,7 +359,7 @@ function Test-IsTextControl($el) {
   return $false
 }
 
-$fg = Get-ForegroundWindowInfo
+$fg = if ($TargetHwnd -gt 0) { Get-WindowInfo $TargetHwnd } else { Get-ForegroundWindowInfo }
 $hwnd = $fg.Hwnd
 $className = $fg.ClassName
 $processName = $fg.ProcessName
@@ -259,32 +372,70 @@ $hasSelection = $false
 $focusedIsTerminalPane = $false
 $isTerminal = $false
 
+if ($TargetHwnd -gt 0) {
+  [WinFg]::FocusWindow([IntPtr]::new($TargetHwnd))
+  Start-Sleep -Milliseconds 80
+}
+
 try {
   $focusedEl = [System.Windows.Automation.AutomationElement]::FocusedElement
-  $focusedIsTerminalPane = (Test-FocusedElementIsTerminalPane $focusedEl) -or (Test-FocusedElementIsConsolePane $focusedEl)
+  $focusedIsTerminalPane = Resolve-FocusedIsTerminalPane $focusedEl $processName
 } catch {}
+
+if ($isIntegratedHost -and -not $focusedIsTerminalPane) {
+  $skipPaneTree = $false
+  try {
+    $checkEl = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (Test-IsTextControl $checkEl) { $skipPaneTree = $true }
+  } catch {}
+  if (-not $skipPaneTree) {
+    $paneEl = Find-TerminalPaneInWindow $hwnd
+    if ($null -ne $paneEl) {
+      $focusedIsTerminalPane = $true
+      $lastEl = $paneEl
+    }
+  }
+}
 
 $isTerminal = $isNativeTerminal -or ($isIntegratedHost -and $focusedIsTerminalPane)
 $useConhostCopy = $className -eq "ConsoleWindowClass"
+$useIntegratedCopy = $isIntegratedHost -and -not $isNativeTerminal
 
 if ($isTerminal) {
   for ($i = 0; $i -lt 3; $i++) {
     try {
-      $el = [System.Windows.Automation.AutomationElement]::FocusedElement
+      $el = $lastEl
+      if ($null -eq $el) {
+        try { $el = [System.Windows.Automation.AutomationElement]::FocusedElement } catch {}
+      }
+      if ($null -ne $el) { $lastEl = $el }
+      $termBounds = $null
       if ($null -ne $el) {
-        $lastEl = $el
+        $termBounds = Get-TerminalPaneBoundsFromElement $el
+      }
+      if ($null -eq $termBounds) {
+        $paneEl = Find-TerminalPaneInWindow $hwnd
+        if ($null -ne $paneEl) {
+          $lastEl = $paneEl
+          $el = $paneEl
+          $termBounds = Get-TerminalPaneBoundsFromElement $paneEl
+        }
+      }
+      $text = $null
+      if ($null -ne $el) {
         $text = Get-ElementSelectionText $el
-        if ([string]::IsNullOrEmpty($text)) {
-          $text = Invoke-TerminalSelectionCopy $hwnd $useConhostCopy
-        }
-        if ([string]::IsNullOrEmpty($text)) {
-          $text = Get-ElementDocumentText $el
-        }
-        if (-not [string]::IsNullOrEmpty($text)) {
-          if (-not [string]::IsNullOrEmpty($TextPath)) {
-            $enc = New-Object System.Text.UTF8Encoding $false
-            [System.IO.File]::WriteAllText($TextPath, $text, $enc)
-          }
+      }
+      if ([string]::IsNullOrEmpty($text)) {
+        $text = Invoke-TerminalPromptLineCopy $hwnd $el $useConhostCopy $useIntegratedCopy $termBounds
+      }
+      if ([string]::IsNullOrEmpty($text)) {
+        $text = Invoke-TerminalSelectionCopy $hwnd $el $useConhostCopy $useIntegratedCopy $termBounds
+      }
+      if ([string]::IsNullOrEmpty($text) -and $null -ne $el) {
+        $text = Get-ElementDocumentText $el
+      }
+      if (Test-IsUsableCaptureText $text) {
+        if (Write-CaptureTextPath $text $TextPath) {
           $uiaStatus = "ok"
           $charCount = $text.Length
           $hasSelection = $true
@@ -295,54 +446,74 @@ if ($isTerminal) {
     if ($i -lt 2) { Start-Sleep -Milliseconds 50 }
   }
 } else {
-  for ($i = 0; $i -lt 3; $i++) {
-    try {
-      $el = [System.Windows.Automation.AutomationElement]::FocusedElement
-      if (Test-IsTextControl $el) {
-        $lastEl = $el
-        $text = Get-ElementText $el
-        if (-not [string]::IsNullOrEmpty($text) -and (Test-IsTerminalBufferDump $text -or $isNativeTerminal)) {
-          if (-not [string]::IsNullOrEmpty($TextPath)) {
-            $enc = New-Object System.Text.UTF8Encoding $false
-            [System.IO.File]::WriteAllText($TextPath, $text, $enc)
+  if ($uiaStatus -ne "ok") {
+    for ($i = 0; $i -lt 3; $i++) {
+      try {
+        $el = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if (Test-IsTextControl $el) {
+          $lastEl = $el
+          $text = Get-ElementText $el
+          if (-not [string]::IsNullOrEmpty($text) -and (Test-IsTerminalBufferDump $text -or $isNativeTerminal)) {
+            if (Write-CaptureTextPath $text $TextPath) {
+              $isTerminal = $true
+              $uiaStatus = "ok"
+              $charCount = $text.Length
+              $hasSelection = $true
+              break
+            }
           }
-          $isTerminal = $true
-          $uiaStatus = "ok"
-          $charCount = $text.Length
-          $hasSelection = $true
-          break
-        }
-        if (-not [string]::IsNullOrEmpty($text)) {
-          Write-ElementMeta $el "preCaptureFocus" $MetaPath
-          if (-not [string]::IsNullOrEmpty($TextPath)) {
-            $enc = New-Object System.Text.UTF8Encoding $false
-            [System.IO.File]::WriteAllText($TextPath, $text, $enc)
+          if (-not [string]::IsNullOrEmpty($text) -and (Test-IsCaptureNoise $text)) {
+            $text = $null
           }
-          $uiaStatus = "ok"
-          $charCount = $text.Length
-          break
+          if (-not [string]::IsNullOrEmpty($text)) {
+            Write-ElementMeta $el "preCaptureFocus" $MetaPath $className $processName
+            if (Write-CaptureTextPath $text $TextPath) {
+              $uiaStatus = "ok"
+              $charCount = $text.Length
+              break
+            }
+          }
         }
-      }
-    } catch {}
-    if ($i -lt 2) { Start-Sleep -Milliseconds 50 }
+      } catch {}
+      if ($i -lt 2) { Start-Sleep -Milliseconds 50 }
+    }
   }
 
-  if ($uiaStatus -ne "ok" -and $null -ne $lastEl) {
-    Write-ElementMeta $lastEl "preCaptureFocus" $MetaPath
-    $uiaStatus = "ok"
+}
+
+$terminalBounds = $null
+if ($isTerminal) {
+  $boundsEl = $lastEl
+  if ($null -eq $boundsEl) {
+    $boundsEl = Find-TerminalPaneInWindow $hwnd
   }
+  if ($null -eq $boundsEl) {
+    try { $boundsEl = [System.Windows.Automation.AutomationElement]::FocusedElement } catch {}
+  }
+  $terminalBounds = Get-TerminalPaneBoundsFromElement $boundsEl
+}
+
+$hostKind = "native"
+if ($isTerminal) {
+  $hostKind = "terminal"
+} elseif (-not $isTerminal) {
+  $hostKind = Get-HostKind $className "" ""
 }
 
 $result = @{
   hwnd                  = $hwnd
   className             = $className
   process               = $processName
+  hostKind              = $hostKind
   isTerminal            = $isTerminal
   focusedIsTerminalPane = $focusedIsTerminalPane
   hasSelection          = $hasSelection
   uia                   = $uiaStatus
   chars                 = $charCount
 }
+if ($null -ne $terminalBounds) {
+  $result.terminalBounds = $terminalBounds
+}
 Write-Output ($result | ConvertTo-Json -Compress)
-if ($uiaStatus -eq "ok") { exit 0 }
+if ($uiaStatus -eq "ok" -and $charCount -gt 0) { exit 0 }
 exit 1

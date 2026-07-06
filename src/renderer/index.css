@@ -189,6 +189,68 @@ body {
   font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
 }
 
+/* Overlay ⋮-menu snap placement skeleton */
+.overlay-placement {
+  position: relative;
+  width: 140px;
+  height: 88px;
+  margin: 0 auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.overlay-placement__zone {
+  position: absolute;
+  width: 28px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.overlay-placement__zone:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.overlay-placement__zone--selected {
+  background: rgba(99, 102, 241, 0.55);
+  border-color: rgba(129, 140, 248, 0.9);
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.5);
+}
+
+.overlay-placement__zone--tl {
+  top: 8px;
+  left: 8px;
+}
+
+.overlay-placement__zone--tr {
+  top: 8px;
+  right: 8px;
+}
+
+.overlay-placement__zone--c {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 32px;
+  height: 22px;
+}
+
+.overlay-placement__zone--bl {
+  bottom: 8px;
+  left: 8px;
+}
+
+.overlay-placement__zone--br {
+  bottom: 8px;
+  right: 8px;
+}
+
 input,
 textarea,
 select {

@@ -10,8 +10,10 @@ import {
 import { flushSync } from "react-dom";
 import { api } from "../api";
 import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
-import type { CaptureMode, ModelId, OptLevel } from "../../shared/types";
+import type { CaptureMode, ModelId, OptLevel, OverlayPlacement } from "../../shared/types";
 import { MODELS, LEVEL_LABELS } from "../../shared/types";
+import { toTerminalSingleLine, stripTerminalStreamChunk } from "../../shared/terminalOutput";
+import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
 
 type Phase = "idle" | "capturing" | "optimizing" | "done" | "error";
 
@@ -243,6 +245,7 @@ export function Overlay() {
   const [mode, setMode] = useState<CaptureMode>("field");
   const [model, setModel] = useState<ModelId>("claude-opus-4.8");
   const [level, setLevel] = useState<OptLevel>(2);
+  const [overlayPlacement, setOverlayPlacement] = useState<OverlayPlacement>("center");
   const [prompt, setPrompt] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [outputText, setOutputText] = useState("");
@@ -276,12 +279,12 @@ export function Overlay() {
 
   keyStateRef.current = { mode, phase, captureFailed: mode === "empty" };
 
+  const isTerminalSession = mode === "terminal" || terminalContext;
+
   function ackOverlayPrepared(): void {
     void document.body.offsetHeight;
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        api.overlayPrepared();
-      });
+      api.overlayPrepared();
     });
   }
 
@@ -307,6 +310,7 @@ export function Overlay() {
       const s = await api.settingsGet();
       setModel(s.defaultModel);
       setLevel(s.defaultLevel);
+      setOverlayPlacement(s.overlayPlacement);
     })();
 
     const applyCapture = (detail: {
@@ -379,12 +383,13 @@ export function Overlay() {
     setOutputText("");
     try {
       const res = await api.optimize(
-        { prompt, model, level, skipCache: hasGenerated },
-        appendTarget,
+        { prompt, model, level, skipCache: hasGenerated, terminalContext: isTerminalSession },
+        isTerminalSession ? (chunk) => appendTarget(stripTerminalStreamChunk(chunk)) : appendTarget,
       );
-      setTarget(res.optimizedPrompt);
+      const refined = isTerminalSession ? toTerminalSingleLine(res.optimizedPrompt) : res.optimizedPrompt;
+      setTarget(refined);
       await waitUntilRevealed();
-      setOutputText(res.optimizedPrompt);
+      setOutputText(refined);
       setHasGenerated(true);
       setPhase("done");
     } catch (e: any) {
@@ -400,12 +405,8 @@ export function Overlay() {
   async function onApply() {
     if (!outputText.trim() || phase !== "done") return;
     setApplyNotice(null);
-    if (mode === "terminal") {
-      await api.captureCopy(outputText);
-      setApplyNotice("Terminal: copied to clipboard");
-      return;
-    }
-    const res = await api.captureInject(outputText, captureRef.current?.snapshot ?? { text: "", hasText: false });
+    const text = isTerminalSession ? toTerminalSingleLine(outputText) : outputText;
+    const res = await api.captureInject(text, captureRef.current?.snapshot ?? { text: "", hasText: false });
     if (res === "copied") {
       setApplyNotice("Couldn't insert — copied to clipboard");
     }
@@ -413,7 +414,13 @@ export function Overlay() {
 
   async function onCopy() {
     if (!outputText.trim()) return;
-    await api.captureCopy(outputText);
+    const text = isTerminalSession ? toTerminalSingleLine(outputText) : outputText;
+    await api.captureCopy(text);
+  }
+
+  async function onPlacementChange(placement: OverlayPlacement) {
+    setOverlayPlacement(placement);
+    await api.setOverlayPlacement(placement);
   }
 
   actionsRef.current = { runOptimize: () => void runOptimize(), onApply: () => void onApply() };
@@ -421,13 +428,20 @@ export function Overlay() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const { mode: m, phase: p, captureFailed: failed } = keyStateRef.current;
+      const tag = (e.target as HTMLElement).tagName;
+      const inEditable = tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
       if (e.key === "Escape") api.hideOverlay();
-      if ((m === "field" || m === "terminal") && ["1", "2", "3", "4"].includes(e.key) && !e.metaKey && !e.ctrlKey) {
+      if (
+        !inEditable &&
+        (m === "field" || m === "terminal") &&
+        ["1", "2", "3", "4"].includes(e.key) &&
+        !e.metaKey &&
+        !e.ctrlKey
+      ) {
         setLevel(Number(e.key) as OptLevel);
       }
       if (e.key === "Enter" && !e.shiftKey && !failed && p !== "capturing") {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
+        if (inEditable) return;
         e.preventDefault();
         if (p === "idle" || p === "error") actionsRef.current.runOptimize();
         else if (p === "done") actionsRef.current.onApply();
@@ -444,7 +458,6 @@ export function Overlay() {
   const showOutput = busy || phase === "done" || phase === "error";
   const outputValue = busy ? displayed : outputText;
   const canApplyOrCopy = !!outputText.trim() && phase === "done";
-  const applyLabel = mode === "terminal" ? "Copy" : "Apply";
   const modelLabel = MODELS.find((m) => m.id === model)?.label ?? model;
   const controlsDisabled = captureFailed || capturing || busy;
 
@@ -473,7 +486,12 @@ export function Overlay() {
             <MoreIcon />
           </button>
           {menuOpen && (
-            <div className="apple-glass-menu absolute right-0 mt-1 min-w-[140px] rounded-xl py-1 text-white">
+            <div className="apple-glass-menu absolute right-0 mt-1 min-w-[180px] rounded-xl py-2 text-white">
+              <div className="px-3 pb-2">
+                <div className="text-[10px] uppercase tracking-wider text-white/50 mb-2">Position</div>
+                <OverlayPlacementPicker value={overlayPlacement} onChange={onPlacementChange} />
+              </div>
+              <div className="border-t border-white/10 my-1" />
               <button
                 type="button"
                 onClick={() => {
@@ -499,7 +517,7 @@ export function Overlay() {
         {captureFailed ? (
           <div className="apple-glass-panel rounded-[26px] p-4 text-sm text-warn">
             {terminalContext
-              ? "Select text in the terminal first, then press the hotkey."
+              ? "Select terminal text or type at the prompt, then press the hotkey."
               : "Could not capture text. Make sure the cursor is in a text field."}
           </div>
         ) : (
@@ -532,7 +550,15 @@ export function Overlay() {
                 <textarea
                   ref={outputRef}
                   value={showOutput ? outputValue : ""}
-                  onChange={(e) => setOutputText(e.target.value)}
+                  onChange={(e) => {
+                    const next = isTerminalSession ? toTerminalSingleLine(e.target.value) : e.target.value;
+                    setOutputText(next);
+                  }}
+                  onKeyDown={(e) => {
+                    if (isTerminalSession && e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                    }
+                  }}
                   readOnly={busy || capturing || phase === "error"}
                   aria-label="Refined prompt output"
                   placeholder={outputPlaceholder}
@@ -569,13 +595,11 @@ export function Overlay() {
                   Discard
                 </button>
                 <GlassPill onClick={onApply} disabled={!canApplyOrCopy}>
-                  {applyLabel}
+                  Apply
                 </GlassPill>
-                {mode !== "terminal" && (
-                  <GlassPill onClick={() => void onCopy()} disabled={!canApplyOrCopy}>
-                    Copy
-                  </GlassPill>
-                )}
+                <GlassPill onClick={() => void onCopy()} disabled={!canApplyOrCopy}>
+                  Copy
+                </GlassPill>
               </div>
             </div>
           </>

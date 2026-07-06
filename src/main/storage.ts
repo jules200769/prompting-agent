@@ -16,6 +16,7 @@ import type {
   SubScores,
 } from "../shared/types";
 import { DEFAULT_SETTINGS } from "../shared/types";
+import { nearestPlacement, type DisplayRect, type OverlaySize } from "../shared/overlayPosition";
 import { buildDiff } from "../engine/diff";
 import { adherenceLevel } from "../engine/rubric";
 
@@ -42,9 +43,17 @@ interface StoreShape {
   history: HistoryItem[];
   optCache: Record<string, CachedOptimizeEntry>;
   optCacheOrder: string[];
+  /** @deprecated Migrated to settings.overlayPlacement; cleared on first launch after upgrade. */
+  overlayPosition?: { x: number; y: number } | null;
 }
 
-const EMPTY: StoreShape = { settings: null, library: [], history: [], optCache: {}, optCacheOrder: [] };
+const EMPTY: StoreShape = {
+  settings: null,
+  library: [],
+  history: [],
+  optCache: {},
+  optCacheOrder: [],
+};
 
 let data: StoreShape | null = null;
 
@@ -138,6 +147,26 @@ export function setSettings(s: AppSettings): void {
   persist();
 }
 
+/** One-time migration from legacy dragged x/y to snap placement. */
+export function migrateLegacyOverlayPlacement(workArea: DisplayRect, size: OverlaySize): void {
+  const d = load();
+  const legacy = d.overlayPosition;
+  if (!legacy || !Number.isFinite(legacy.x) || !Number.isFinite(legacy.y)) {
+    if (legacy != null) {
+      d.overlayPosition = null;
+      persist();
+    }
+    return;
+  }
+  const placement = nearestPlacement(legacy, size, workArea);
+  const current = d.settings ?? {};
+  if (!("overlayPlacement" in current)) {
+    d.settings = { ...DEFAULT_SETTINGS, ...current, overlayPlacement: placement };
+  }
+  d.overlayPosition = null;
+  persist();
+}
+
 // ---------- Library ----------
 export function listLibrary(): LibraryItem[] {
   return [...load().library].sort((a, b) => b.updatedAt - a.updatedAt);
@@ -196,8 +225,15 @@ export function clearHistory(): void {
 // ---------- Opt cache ----------
 import { REWRITE_PIPELINE_VERSION } from "../engine/guideLoader";
 
-export function cacheHash(req: { prompt: string; model: string; level: number; persona?: string }): string {
-  return `v${REWRITE_PIPELINE_VERSION}|${req.model}|${req.level}|${req.persona ?? ""}|${req.prompt.trim().toLowerCase()}`;
+export function cacheHash(req: {
+  prompt: string;
+  model: string;
+  level: number;
+  persona?: string;
+  terminalContext?: boolean;
+}): string {
+  const term = req.terminalContext ? "|terminal" : "";
+  return `v${REWRITE_PIPELINE_VERSION}|${req.model}|${req.level}|${req.persona ?? ""}${term}|${req.prompt.trim().toLowerCase()}`;
 }
 
 export function hydrateCacheResult(cached: CachedOptimizeEntry, originalPrompt: string): OptimizeResult {
