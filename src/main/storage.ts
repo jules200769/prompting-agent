@@ -231,9 +231,11 @@ export function cacheHash(req: {
   level: number;
   persona?: string;
   terminalContext?: boolean;
+  promptType?: string;
 }): string {
   const term = req.terminalContext ? "|terminal" : "";
-  return `v${REWRITE_PIPELINE_VERSION}|${req.model}|${req.level}|${req.persona ?? ""}${term}|${req.prompt.trim().toLowerCase()}`;
+  const type = req.promptType && req.promptType !== "auto" ? `|type:${req.promptType}` : "";
+  return `v${REWRITE_PIPELINE_VERSION}|${req.model}|${req.level}|${req.persona ?? ""}${term}${type}|${req.prompt.trim().toLowerCase()}`;
 }
 
 export function hydrateCacheResult(cached: CachedOptimizeEntry, originalPrompt: string): OptimizeResult {

@@ -45,7 +45,27 @@ export const LEVEL_LABELS: Record<OptLevel, string> = {
   4: "Max",
 };
 
+/** Level recognition colors — identical on every surface (overlay slider label, Studio segments). */
+export const LEVEL_COLORS: Record<OptLevel, string> = {
+  1: "#5AC8FA",
+  2: "#FFD60A",
+  3: "#FF9F0A",
+  4: "#FF453A",
+};
+
 export type CaptureMode = "field" | "empty" | "terminal";
+
+/** Overlay top-tab prompt type: shapes the rewrite deliverable; "auto" adds no hint. */
+export type PromptType = "auto" | "question" | "prompt" | "letter";
+
+export const PROMPT_TYPES: PromptType[] = ["auto", "question", "prompt", "letter"];
+
+export const PROMPT_TYPE_LABELS: Record<PromptType, string> = {
+  auto: "Auto",
+  question: "Question",
+  prompt: "Prompt",
+  letter: "Letter",
+};
 
 export type InjectResult = "injected" | "copied";
 
@@ -90,6 +110,8 @@ export interface OptimizeRequest {
   context?: string;
   /** When true, bypass persisted opt cache (e.g. overlay Regenerate). */
   skipCache?: boolean;
+  /** Overlay top-tab type hint; "auto"/undefined adds nothing to the meta-prompt. */
+  promptType?: PromptType;
   /** Terminal capture: refined output must be a single line (no newlines) for shell paste. */
   terminalContext?: boolean;
 }
@@ -151,6 +173,7 @@ export interface AppSettings {
   telemetry: boolean;
   theme: "dark" | "light";
   overlayPlacement: OverlayPlacement;
+  onboardingDone: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -164,6 +187,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   telemetry: false,
   theme: "dark",
   overlayPlacement: "center",
+  onboardingDone: false,
 };
 
 export const RUBRIC_WEIGHTS: SubScores = {
@@ -215,4 +239,16 @@ export const IPC = {
   STUDIO_ROUTE: "promptforge:studio:route",
   TRAY_QUIT: "promptforge:tray:quit",
   OPTIMIZE_STREAM: "promptforge:optimize:stream",
+  ONBOARDING_FINISH: "promptforge:onboarding:finish",
+  SHELL_OPEN_EXTERNAL: "promptforge:shell:open-external",
+  STUDIO_OPEN_WORKBENCH: "promptforge:studio:open-workbench",
+  STUDIO_WORKBENCH_SEED: "promptforge:studio:workbench-seed",
 } as const;
+
+/** Payload for opening the Studio workbench pre-seeded from the overlay or a saved item. */
+export interface WorkbenchSeed {
+  originalText: string;
+  optimizedText?: string;
+  model: ModelId;
+  level: OptLevel;
+}

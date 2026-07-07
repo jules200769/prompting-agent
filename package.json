@@ -64,6 +64,12 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ],
     "win": {
       "target": [
         "nsis"

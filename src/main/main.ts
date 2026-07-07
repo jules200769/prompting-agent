@@ -1,7 +1,7 @@
 // Electron main: lifecycle, overlay + studio windows, tray, global hotkey, IPC.
 import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell, screen } from "electron";
 import { join } from "node:path";
-import { IPC, type AppSettings, type CaptureMode, type OptimizeRequest, type OverlayPlacement, type Provider, isOverlayPlacement } from "../shared/types";
+import { IPC, type AppSettings, type CaptureMode, type OptimizeRequest, type OverlayPlacement, type Provider, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
 import { resolveOverlayPosition } from "../shared/overlayPosition";
 import { analyze } from "../engine/orchestrator";
 import * as store from "./storage";
@@ -29,6 +29,9 @@ function getSkipCaptureHwnds(): number[] {
   if (overlay?.isVisible()) {
     skip.push(hwndFromBuffer(overlay.getNativeWindowHandle()));
   }
+  if (onboarding?.isVisible()) {
+    skip.push(hwndFromBuffer(onboarding.getNativeWindowHandle()));
+  }
   return skip.filter((h) => h > 0);
 }
 
@@ -41,6 +44,7 @@ function getStudioFallbackHwnd(): number | null {
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 let overlay: BrowserWindow | null = null;
 let studio: BrowserWindow | null = null;
+let onboarding: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let pendingCapture: {
   text: string;
@@ -93,6 +97,37 @@ function createOverlay(): BrowserWindow {
     if (overlaySessionOpen && !hotkeyInFlight) void hideOverlay();
   });
   loadUrl(w, "/overlay");
+  return w;
+}
+
+/** First-run onboarding: separate frameless glass window — never reuse the resident overlay. */
+function createOnboarding(): BrowserWindow {
+  const w = new BrowserWindow({
+    width: 720,
+    height: 560,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: false,
+    center: true,
+    webPreferences: {
+      preload: join(__dirname, "..", "preload", "index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      spellcheck: false,
+    },
+  });
+  w.once("ready-to-show", () => w.show());
+  loadUrl(w, "/onboarding");
+  w.on("closed", () => {
+    onboarding = null;
+  });
   return w;
 }
 
@@ -185,6 +220,10 @@ async function deliverCaptureToOverlay(capture: {
   await prepared;
   overlay.setOpacity(1);
   overlaySessionOpen = true;
+  // Focus once per session, only after the UIA snapshot is frozen (still hotkeyInFlight
+  // here) so Enter/1-4/Esc work without a click. Never focus in showOverlayShell() —
+  // that would steal focus from the source app before the snapshot runs.
+  overlay.focus();
 }
 
 async function hideOverlay(): Promise<void> {
@@ -223,6 +262,7 @@ async function revealOverlayAfterInjectFallback(): Promise<void> {
   revealOverlay();
   overlay.setOpacity(1);
   overlaySessionOpen = true;
+  overlay.focus();
 }
 
 /** Prime hidden framebuffer to blank session state (matches first hotkey after reload). */
@@ -360,7 +400,13 @@ function registerHotkey(settings: AppSettings): void {
 }
 
 function buildTray(): void {
-  const icon = nativeImage.createEmpty();
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, "assets", "tray.png")
+    : join(app.getAppPath(), "assets", "tray.png");
+  let icon = nativeImage.createFromPath(iconPath);
+  if (!icon.isEmpty()) {
+    icon = icon.resize({ width: 16, height: 16 });
+  }
   tray = new Tray(icon);
   const menu = Menu.buildFromTemplate([
     { label: "Open Studio", click: () => ensureStudio() },
@@ -371,7 +417,7 @@ function buildTray(): void {
     { label: "Quit", click: () => app.quit() },
   ]);
   tray.setContextMenu(menu);
-  tray.setToolTip("PromptForge");
+  tray.setToolTip("PromptForge — Ctrl+Shift+O");
 }
 
 // ---------- IPC handlers ----------
@@ -468,6 +514,31 @@ function registerIpc(): void {
   });
   ipcMain.on(IPC.STUDIO_SHOW, () => ensureStudio());
   ipcMain.on(IPC.STUDIO_SETTINGS, () => ensureStudio("settings"));
+
+  ipcMain.on(IPC.STUDIO_OPEN_WORKBENCH, (_evt, seed: WorkbenchSeed) => {
+    const send = () => studio?.webContents.send(IPC.STUDIO_WORKBENCH_SEED, seed);
+    if (!studio) {
+      studio = createStudio();
+      studio.webContents.once("did-finish-load", send);
+    } else {
+      send();
+    }
+    if (!studio.isVisible()) studio.show();
+    studio.focus();
+    void hideOverlay();
+  });
+
+  ipcMain.on(IPC.ONBOARDING_FINISH, () => {
+    store.setSettings({ ...store.getSettings(), onboardingDone: true });
+    onboarding?.close();
+  });
+  ipcMain.handle(IPC.SHELL_OPEN_EXTERNAL, (_evt, url: unknown) => {
+    if (typeof url === "string" && /^https:\/\//.test(url)) {
+      void shell.openExternal(url);
+      return true;
+    }
+    return false;
+  });
   ipcMain.on(IPC.TRAY_QUIT, () => app.quit());
 
   // Open external links in the default browser, not in-app.
@@ -494,6 +565,9 @@ app.whenReady().then(() => {
   const settings = store.getSettings();
   registerHotkey(settings);
   if (isDev) startDevBridge();
+  if (!settings.onboardingDone) {
+    onboarding = createOnboarding();
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) ensureStudio();

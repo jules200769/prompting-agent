@@ -1,23 +1,46 @@
-import { useEffect, useState } from "react";
-import type { AppSettings, HistoryItem, LibraryItem, ModelId, OptLevel } from "../../shared/types";
-import { MODELS, REWRITE_CONFIG, LEVEL_LABELS } from "../../shared/types";
+import { useEffect, useRef, useState } from "react";
+import type { AppSettings, HistoryItem, LibraryItem, ModelId, OptLevel, WorkbenchSeed } from "../../shared/types";
+import { MODELS, REWRITE_CONFIG, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
+import { acceleratorFromEvent } from "../../shared/accelerator";
 import { api } from "../api";
 import { ScoreRing, RubricChips, ScoreLift } from "../components/Score";
 import { DiffView } from "../components/DiffView";
+import { ToastProvider, useToast } from "../components/Toast";
 
 type Tab = "workbench" | "library" | "history" | "settings";
 
 export function Studio() {
+  return (
+    <ToastProvider>
+      <StudioShell />
+    </ToastProvider>
+  );
+}
+
+function StudioShell() {
   const [tab, setTab] = useState<Tab>("workbench");
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [seed, setSeed] = useState<WorkbenchSeed | null>(null);
 
   useEffect(() => {
     (async () => setSettings(await api.settingsGet()))();
     const off = api.onStudioRoute((route) => {
       if (route === "settings") setTab("settings");
     });
-    return () => off?.();
+    const offSeed = api.onStudioWorkbench((s) => {
+      setSeed(s);
+      setTab("workbench");
+    });
+    return () => {
+      off?.();
+      offSeed?.();
+    };
   }, []);
+
+  const openInWorkbench = (s: WorkbenchSeed) => {
+    setSeed(s);
+    setTab("workbench");
+  };
 
   return (
     <div className="h-full flex bg-bg-950 text-slate-100">
@@ -45,9 +68,9 @@ export function Studio() {
 
       {/* Main */}
       <main className="flex-1 min-w-0 overflow-hidden">
-        {tab === "workbench" && <Workbench defaultSettings={settings} />}
-        {tab === "library" && <Library />}
-        {tab === "history" && <History />}
+        {tab === "workbench" && <Workbench defaultSettings={settings} seed={seed} />}
+        {tab === "library" && <Library onOpen={openInWorkbench} />}
+        {tab === "history" && <History onOpen={openInWorkbench} />}
         {tab === "settings" && <Settings />}
       </main>
     </div>
@@ -55,7 +78,13 @@ export function Studio() {
 }
 
 // ---------------- Workbench ----------------
-function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null }) {
+function Workbench({
+  defaultSettings,
+  seed,
+}: {
+  defaultSettings: AppSettings | null;
+  seed: WorkbenchSeed | null;
+}) {
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ModelId>(defaultSettings?.defaultModel ?? "claude-opus-4.8");
   const [level, setLevel] = useState<OptLevel>(defaultSettings?.defaultLevel ?? 2);
@@ -65,6 +94,8 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
   const [streamed, setStreamed] = useState("");
   const [result, setResult] = useState<any>(null);
   const [analysis, setAnalysis] = useState<{ score: number; subscores: any; weaknesses: string[] } | null>(null);
+  const [view, setView] = useState<"diff" | "clean">("diff");
+  const toast = useToast();
 
   useEffect(() => {
     if (defaultSettings) {
@@ -74,6 +105,16 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
       setContext(defaultSettings.contextMemory);
     }
   }, [defaultSettings]);
+
+  useEffect(() => {
+    if (!seed) return;
+    setPrompt(seed.originalText);
+    setModel(seed.model);
+    setLevel(seed.level);
+    setResult(null);
+    setAnalysis(null);
+    setStreamed(seed.optimizedText ?? "");
+  }, [seed]);
 
   async function runAnalyze() {
     if (!prompt.trim()) return;
@@ -106,7 +147,7 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
       optimizedText: result.optimizedPrompt,
       model, level, score: result.score, tags: [model, `L${level}`],
     });
-    alert("Saved to library.");
+    toast({ text: "Saved to library." });
   }
 
   return (
@@ -121,8 +162,9 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
             <button
               key={l}
               onClick={() => setLevel(l)}
-              title={`L${l} ${LEVEL_LABELS[l]} · guide-structuur`}
-              className={`px-2 py-0.5 text-xs rounded ${level === l ? "bg-accent text-white" : "text-muted"}`}
+              title={`L${l} ${LEVEL_LABELS[l]} · guide structure`}
+              className={`px-2 py-0.5 text-xs rounded font-medium ${level === l ? "" : "text-muted"}`}
+              style={level === l ? { background: LEVEL_COLORS[l] + "26", color: LEVEL_COLORS[l] } : undefined}
             >
               {l} {LEVEL_LABELS[l]}
             </button>
@@ -159,17 +201,42 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
         <div className="bg-bg-950 flex flex-col">
           <div className="px-4 py-2 text-[10px] uppercase tracking-wider text-muted border-b border-line flex items-center gap-2">
             Optimized
-            {result && (
-              <span className="normal-case px-1.5 py-0.5 rounded bg-bg-800 text-accent font-medium">
-                Structuur: {LEVEL_LABELS[result.adherenceLevel]}
-              </span>
-            )}
+            {result &&
+              (result.adherenceLevel < result.level ? (
+                <span className="normal-case px-1.5 py-0.5 rounded bg-warn/10 text-warn font-medium">
+                  Requested {LEVEL_LABELS[result.level as OptLevel]} · Measured{" "}
+                  {LEVEL_LABELS[result.adherenceLevel as OptLevel]}
+                </span>
+              ) : (
+                <span className="normal-case px-1.5 py-0.5 rounded bg-bg-800 text-accent font-medium">
+                  Structure: {LEVEL_LABELS[result.adherenceLevel as OptLevel]}
+                </span>
+              ))}
             {result && <ScoreLift before={result.baselineScore} after={result.score} />}
+            {result && (
+              <div className="ml-auto flex items-center bg-bg-800 border border-line rounded p-0.5 normal-case">
+                {(["diff", "clean"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    className={`px-2 py-0.5 rounded text-[10px] capitalize ${view === v ? "bg-bg-700 text-slate-100" : "text-muted"}`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           {result ? (
-            <div className="flex-1 overflow-auto scroll-thin p-4">
-              <DiffView diff={result.diff} />
-            </div>
+            view === "diff" ? (
+              <div className="flex-1 overflow-auto scroll-thin p-4">
+                <DiffView diff={result.diff} />
+              </div>
+            ) : (
+              <pre className="flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-words text-slate-200 overflow-auto scroll-thin select-text">
+                {result.optimizedPrompt}
+              </pre>
+            )
           ) : (
             <pre className="flex-1 p-4 text-sm font-mono whitespace-pre-wrap break-words text-slate-300 overflow-auto scroll-thin">
               {streamed || (busy ? "…" : "Optimized prompt appears here.")}
@@ -208,10 +275,42 @@ function Workbench({ defaultSettings }: { defaultSettings: AppSettings | null })
 }
 
 // ---------------- Library ----------------
-function Library() {
+function Library({ onOpen }: { onOpen: (seed: WorkbenchSeed) => void }) {
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [q, setQ] = useState("");
-  useEffect(() => { void api.libraryList().then(setItems); }, []);
+  const toast = useToast();
+  const deleteTimers = useRef(new Map<string, number>());
+  useEffect(() => {
+    void api.libraryList().then(setItems);
+    const timers = deleteTimers.current;
+    return () => {
+      // Unmount flushes pending deletes immediately (undo window closes with the view).
+      for (const id of timers.keys()) void api.libraryDelete(id);
+      timers.forEach((t) => window.clearTimeout(t));
+      timers.clear();
+    };
+  }, []);
+
+  function deleteWithUndo(it: LibraryItem) {
+    setItems((list) => list.filter((x) => x.id !== it.id));
+    const timer = window.setTimeout(() => {
+      deleteTimers.current.delete(it.id);
+      void api.libraryDelete(it.id);
+    }, 5000);
+    deleteTimers.current.set(it.id, timer);
+    toast({
+      text: `Deleted "${it.title}"`,
+      actionLabel: "Undo",
+      durationMs: 5000,
+      onAction: () => {
+        const t = deleteTimers.current.get(it.id);
+        if (t) window.clearTimeout(t);
+        deleteTimers.current.delete(it.id);
+        setItems((list) => [it, ...list]);
+      },
+    });
+  }
+
   const filtered = items.filter((i) => (i.title + i.originalText + i.tags.join(" ")).toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="h-full flex flex-col">
@@ -222,11 +321,25 @@ function Library() {
       <div className="flex-1 overflow-auto scroll-thin p-4 space-y-2">
         {filtered.length === 0 && <div className="text-muted text-sm p-8 text-center">No saved prompts yet.</div>}
         {filtered.map((it) => (
-          <div key={it.id} className="bg-bg-900 border border-line rounded-md p-3">
+          <div
+            key={it.id}
+            className="bg-bg-900 border border-line rounded-md p-3 cursor-pointer hover:border-accent/50 transition-colors"
+            onClick={() =>
+              onOpen({ originalText: it.originalText, optimizedText: it.optimizedText, model: it.model, level: it.level })
+            }
+          >
             <div className="flex items-center gap-2">
               <span className="font-medium text-sm truncate flex-1">{it.title}</span>
               <span className="text-[10px] text-muted">{it.model} · L{it.level} · score {it.score}</span>
-              <button onClick={async () => { await api.libraryDelete(it.id); setItems(await api.libraryList()); }} className="text-[10px] text-bad hover:underline">delete</button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteWithUndo(it);
+                }}
+                className="text-[10px] text-bad hover:underline"
+              >
+                delete
+              </button>
             </div>
             <div className="text-xs text-slate-400 mt-1 line-clamp-2">{it.optimizedText}</div>
             <div className="flex gap-1 mt-2">{it.tags.map((t) => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-bg-800 text-muted">{t}</span>)}</div>
@@ -238,14 +351,39 @@ function Library() {
 }
 
 // ---------------- History ----------------
-function History() {
+function History({ onOpen }: { onOpen: (seed: WorkbenchSeed) => void }) {
   const [items, setItems] = useState<HistoryItem[]>([]);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const toast = useToast();
   useEffect(() => { void api.historyList().then(setItems); }, []);
+
+  useEffect(() => {
+    if (!confirmingClear) return;
+    const t = window.setTimeout(() => setConfirmingClear(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [confirmingClear]);
+
+  async function onClear() {
+    if (!confirmingClear) {
+      setConfirmingClear(true);
+      return;
+    }
+    setConfirmingClear(false);
+    await api.historyClear();
+    setItems([]);
+    toast({ text: "History cleared." });
+  }
+
   return (
     <div className="h-full flex flex-col">
       <div className="px-5 py-3 border-b border-line flex items-center">
         <h2 className="font-semibold">History</h2>
-        <button onClick={async () => { await api.historyClear(); setItems([]); }} className="ml-auto text-xs text-muted hover:text-bad">clear</button>
+        <button
+          onClick={() => void onClear()}
+          className={`ml-auto text-xs ${confirmingClear ? "text-bad font-semibold" : "text-muted hover:text-bad"}`}
+        >
+          {confirmingClear ? "Confirm clear?" : "clear"}
+        </button>
       </div>
       <div className="flex-1 overflow-auto scroll-thin p-4 space-y-2">
         {items.length === 0 && <div className="text-muted text-sm p-8 text-center">No optimizations yet.</div>}
@@ -254,6 +392,21 @@ function History() {
             <div className="flex items-center gap-2 text-muted">
               <span>{h.model} · L{h.level} · score {h.score} · {h.source}</span>
               <span className="ml-auto">{new Date(h.createdAt).toLocaleString()}</span>
+              <button
+                onClick={() => onOpen({ originalText: h.originalText, model: h.model, level: h.level })}
+                className="text-accent-soft hover:underline"
+              >
+                Re-run
+              </button>
+              <button
+                onClick={async () => {
+                  await navigator.clipboard?.writeText(h.optimizedText);
+                  toast({ text: "Copied to clipboard." });
+                }}
+                className="text-accent-soft hover:underline"
+              >
+                Copy out
+              </button>
             </div>
             <div className="mt-1 text-slate-400 line-clamp-1"><span className="text-muted">in:</span> {h.originalText}</div>
             <div className="text-slate-200 line-clamp-2"><span className="text-muted">out:</span> {h.optimizedText}</div>
@@ -270,6 +423,8 @@ function Settings() {
   const [hasOpenAiKey, setHasOpenAiKey] = useState(false);
   const [isSecure, setIsSecure] = useState(true);
   const [keyInput, setKeyInput] = useState("");
+  const [recordingHotkey, setRecordingHotkey] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     void api.settingsGet().then(setS).catch((e) => { console.error("settingsGet failed", e); });
@@ -284,7 +439,7 @@ function Settings() {
   async function save() {
     if (!s) return;
     await api.settingsSet(s);
-    alert("Settings saved.");
+    toast({ text: "Settings saved." });
   }
 
   async function saveKey() {
@@ -311,7 +466,38 @@ function Settings() {
           )}
           <div className="space-y-4">
             <Field label="Global hotkey">
-              <input value={s.hotkey} onChange={(e) => update({ hotkey: e.target.value })} className="w-full bg-bg-800 border border-line rounded-md text-sm px-2 py-1.5" />
+              <div className="flex items-center gap-2">
+                <input
+                  value={recordingHotkey ? "Press a key combo… (Esc cancels)" : s.hotkey}
+                  readOnly={recordingHotkey}
+                  onChange={(e) => update({ hotkey: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (!recordingHotkey) return;
+                    e.preventDefault();
+                    if (e.key === "Escape") {
+                      setRecordingHotkey(false);
+                      return;
+                    }
+                    const acc = acceleratorFromEvent(e);
+                    if (acc) {
+                      update({ hotkey: acc });
+                      setRecordingHotkey(false);
+                    }
+                  }}
+                  onBlur={() => setRecordingHotkey(false)}
+                  className={`flex-1 bg-bg-800 border rounded-md text-sm px-2 py-1.5 ${recordingHotkey ? "border-accent text-muted" : "border-line"}`}
+                />
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    setRecordingHotkey(true);
+                    (e.currentTarget.previousElementSibling as HTMLInputElement | null)?.focus();
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-md border border-line hover:border-accent"
+                >
+                  Record
+                </button>
+              </div>
               <p className="text-[10px] text-muted mt-1">Modifiers: CommandOrControl, Shift, Alt, Super. e.g. CommandOrControl+Shift+O</p>
             </Field>
             <div className="grid grid-cols-2 gap-4">
@@ -346,7 +532,7 @@ function Settings() {
         <section>
           <h3 className="font-semibold mb-1">OpenAI API key</h3>
           <p className="text-muted text-xs mb-4">
-            PromptForge uses {REWRITE_CONFIG.label} to generate all optimizations. The chosen target-model pack supplies the prompt-engineering expertise. Keys are encrypted with the OS Credential Manager and never leave this machine. Without a key, PromptForge uses the local fallback optimizer.
+            PromptForge uses {REWRITE_CONFIG.label} to generate all optimizations. The chosen target-model pack supplies the prompt-engineering expertise. Keys are encrypted with the OS Credential Manager and never leave this machine. Without a key, optimization is unavailable — PromptForge never substitutes generic output.
           </p>
           <div className="flex items-center gap-2">
             <div className="w-40">

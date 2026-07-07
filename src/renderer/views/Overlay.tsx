@@ -10,8 +10,8 @@ import {
 import { flushSync } from "react-dom";
 import { api } from "../api";
 import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
-import type { CaptureMode, ModelId, OptLevel, OverlayPlacement } from "../../shared/types";
-import { MODELS, LEVEL_LABELS } from "../../shared/types";
+import type { CaptureMode, ModelId, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
+import { MODELS, LEVEL_LABELS, LEVEL_COLORS, PROMPT_TYPES, PROMPT_TYPE_LABELS } from "../../shared/types";
 import { toTerminalSingleLine, stripTerminalStreamChunk } from "../../shared/terminalOutput";
 import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
 
@@ -19,7 +19,7 @@ type Phase = "idle" | "capturing" | "optimizing" | "done" | "error";
 
 function MoreIcon() {
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="5" r="2" fill="currentColor" />
       <circle cx="12" cy="12" r="2" fill="currentColor" />
       <circle cx="12" cy="19" r="2" fill="currentColor" />
@@ -34,13 +34,6 @@ function ChevronDown() {
     </svg>
   );
 }
-
-const LEVEL_COLORS: Record<OptLevel, string> = {
-  1: "#5AC8FA",
-  2: "#FFD60A",
-  3: "#FF9F0A",
-  4: "#FF453A",
-};
 
 const SLIDER_TRACK_W = 132;
 const SLIDER_EDGE = 13;
@@ -164,18 +157,25 @@ function modelDisplayLabel(id: ModelId): string {
   return m.label.replace("Claude Opus 4.8", "Opus4.8").replace("Claude ", "").replace(" Pro", "");
 }
 
-function ModelPicker({
-  model,
+/** Width-measured select: chevron sits a fixed ~7px after the selected label. */
+function MeasuredSelect({
+  value,
+  options,
   onChange,
   disabled,
+  ariaLabel,
+  textClass = "text-[15px]",
 }: {
-  model: ModelId;
-  onChange: (id: ModelId) => void;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
   disabled?: boolean;
+  ariaLabel: string;
+  textClass?: string;
 }) {
   const measureRef = useRef<HTMLSpanElement>(null);
   const [textWidth, setTextWidth] = useState(0);
-  const displayLabel = modelDisplayLabel(model);
+  const displayLabel = options.find((o) => o.value === value)?.label ?? value;
   const chevronGap = 7;
   const chevronWidth = 10;
   const selectWidth = textWidth + chevronGap + chevronWidth;
@@ -186,25 +186,25 @@ function ModelPicker({
   }, [displayLabel]);
 
   return (
-    <div className="relative inline-block text-[15px] font-medium text-white">
+    <div className={`relative inline-block ${textClass} font-medium text-white`}>
       <span
         ref={measureRef}
         aria-hidden
-        className="invisible absolute whitespace-nowrap font-medium text-[15px] pointer-events-none"
+        className={`invisible absolute whitespace-nowrap font-medium ${textClass} pointer-events-none`}
       >
         {displayLabel}
       </span>
       <select
-        value={model}
-        onChange={(e) => onChange(e.target.value as ModelId)}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        aria-label="Target model"
+        aria-label={ariaLabel}
         style={{ width: selectWidth || undefined }}
-        className="appearance-none bg-transparent border-0 pl-0 pr-0 py-0 text-[15px] font-medium text-white focus:outline-none cursor-pointer disabled:opacity-50"
+        className={`appearance-none bg-transparent border-0 pl-0 pr-0 py-0 ${textClass} font-medium text-white focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/30 focus-visible:outline-offset-2 cursor-pointer disabled:opacity-50`}
       >
-        {MODELS.map((m) => (
-          <option key={m.id} value={m.id} className="bg-bg-900 text-white">
-            {modelDisplayLabel(m.id)}
+        {options.map((o) => (
+          <option key={o.value} value={o.value} className="bg-bg-900 text-white">
+            {o.label}
           </option>
         ))}
       </select>
@@ -215,6 +215,48 @@ function ModelPicker({
         <ChevronDown />
       </span>
     </div>
+  );
+}
+
+function ModelPicker({
+  model,
+  onChange,
+  disabled,
+}: {
+  model: ModelId;
+  onChange: (id: ModelId) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <MeasuredSelect
+      value={model}
+      options={MODELS.map((m) => ({ value: m.id, label: modelDisplayLabel(m.id) }))}
+      onChange={(v) => onChange(v as ModelId)}
+      disabled={disabled}
+      ariaLabel="Target model"
+      textClass="text-[13px]"
+    />
+  );
+}
+
+function PromptTypePicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: PromptType;
+  onChange: (t: PromptType) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <MeasuredSelect
+      value={value}
+      options={PROMPT_TYPES.map((t) => ({ value: t, label: PROMPT_TYPE_LABELS[t] }))}
+      onChange={(v) => onChange(v as PromptType)}
+      disabled={disabled}
+      ariaLabel="Prompt type"
+      textClass="text-[13px]"
+    />
   );
 }
 
@@ -245,6 +287,7 @@ export function Overlay() {
   const [mode, setMode] = useState<CaptureMode>("field");
   const [model, setModel] = useState<ModelId>("claude-opus-4.8");
   const [level, setLevel] = useState<OptLevel>(2);
+  const [promptType, setPromptType] = useState<PromptType>("auto");
   const [overlayPlacement, setOverlayPlacement] = useState<OverlayPlacement>("center");
   const [prompt, setPrompt] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
@@ -271,10 +314,12 @@ export function Overlay() {
   } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const keyStateRef = useRef({ mode, phase, captureFailed: false });
-  const actionsRef = useRef<{ runOptimize: () => void; onApply: () => void }>({
+  const actionsRef = useRef<{ runOptimize: () => void; onApply: () => void; onCopy: () => void }>({
     runOptimize: () => {},
     onApply: () => {},
+    onCopy: () => {},
   });
 
   keyStateRef.current = { mode, phase, captureFailed: mode === "empty" };
@@ -300,6 +345,7 @@ export function Overlay() {
       setMenuOpen(false);
       setApplyNotice(null);
       setTerminalContext(false);
+      setPromptType("auto");
       setShellVisible(false);
     });
     ackOverlayPrepared();
@@ -328,6 +374,7 @@ export function Overlay() {
         };
         setMode(detail.mode);
         setTerminalContext(Boolean(detail.terminalContext));
+        setPromptType("auto");
         setPrompt(detail.text);
         setPhase("idle");
         resetTypewriter();
@@ -344,6 +391,7 @@ export function Overlay() {
       captureRef.current = null;
       setMode("field");
       setTerminalContext(false);
+      setPromptType("auto");
       setPrompt("");
       setPhase("capturing");
       resetTypewriter();
@@ -383,7 +431,7 @@ export function Overlay() {
     setOutputText("");
     try {
       const res = await api.optimize(
-        { prompt, model, level, skipCache: hasGenerated, terminalContext: isTerminalSession },
+        { prompt, model, level, skipCache: hasGenerated, terminalContext: isTerminalSession, promptType },
         isTerminalSession ? (chunk) => appendTarget(stripTerminalStreamChunk(chunk)) : appendTarget,
       );
       const refined = isTerminalSession ? toTerminalSingleLine(res.optimizedPrompt) : res.optimizedPrompt;
@@ -423,7 +471,16 @@ export function Overlay() {
     await api.setOverlayPlacement(placement);
   }
 
-  actionsRef.current = { runOptimize: () => void runOptimize(), onApply: () => void onApply() };
+  actionsRef.current = {
+    runOptimize: () => void runOptimize(),
+    onApply: () => void onApply(),
+    onCopy: () => void onCopy(),
+  };
+
+  // Compose mode (nothing captured): typing is the next action — focus the Original field.
+  useEffect(() => {
+    if (mode === "empty") promptRef.current?.focus();
+  }, [mode]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -433,18 +490,19 @@ export function Overlay() {
       if (e.key === "Escape") api.hideOverlay();
       if (
         !inEditable &&
-        (m === "field" || m === "terminal") &&
+        (m === "field" || m === "terminal" || m === "empty") &&
         ["1", "2", "3", "4"].includes(e.key) &&
         !e.metaKey &&
         !e.ctrlKey
       ) {
         setLevel(Number(e.key) as OptLevel);
       }
-      if (e.key === "Enter" && !e.shiftKey && !failed && p !== "capturing") {
+      if (e.key === "Enter" && !e.shiftKey && p !== "capturing") {
         if (inEditable) return;
         e.preventDefault();
         if (p === "idle" || p === "error") actionsRef.current.runOptimize();
-        else if (p === "done") actionsRef.current.onApply();
+        // Compose mode (m === "empty") has no frozen inject target — Enter copies instead.
+        else if (p === "done") (failed ? actionsRef.current.onCopy : actionsRef.current.onApply)();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -454,18 +512,31 @@ export function Overlay() {
   const busy = phase === "optimizing" || isRevealing;
   const capturing = phase === "capturing";
   const captureFailed = mode === "empty";
-  const canRefine = !captureFailed && !capturing && !!prompt.trim() && !busy;
+  const canRefine = !capturing && !!prompt.trim() && !busy;
   const showOutput = busy || phase === "done" || phase === "error";
   const outputValue = busy ? displayed : outputText;
-  const canApplyOrCopy = !!outputText.trim() && phase === "done";
+  const canCopy = !!outputText.trim() && phase === "done";
+  // Compose mode has no frozen inject target — Copy is the terminal action, Apply stays off.
+  const canApply = canCopy && !captureFailed;
   const modelLabel = MODELS.find((m) => m.id === model)?.label ?? model;
-  const controlsDisabled = captureFailed || capturing || busy;
+  const controlsDisabled = capturing || busy;
 
   const outputPlaceholder = capturing
     ? "Capturing…"
     : busy
       ? "Refining…"
       : "Output will appear here";
+
+  const keyMissingError = phase === "error" && outputText.includes("API key not configured");
+  const phaseAnnouncement = capturing
+    ? "Capturing…"
+    : busy
+      ? "Refining…"
+      : phase === "done"
+        ? "Done — output ready"
+        : phase === "error"
+          ? outputText
+          : "";
 
   useEffect(() => {
     const el = outputRef.current;
@@ -474,19 +545,39 @@ export function Overlay() {
 
   return (
     <div className="overlay-font w-full h-full flex items-center justify-center px-12">
+      <div className="sr-only" aria-live="polite">
+        {phaseAnnouncement}
+      </div>
       <div className={`relative w-full max-w-[578px] ${shellVisible ? "" : "invisible"}`}>
-        <div ref={menuRef} className="absolute top-10 -right-10 z-10">
+        {/* Folder tabs — tucked behind the card (z-0 under the card's z-10) for depth. */}
+        <div className="apple-glass-tab apple-glass-tab--top -top-[26px] left-16 h-[36px] px-5 pt-[3px] text-white">
+          <PromptTypePicker value={promptType} onChange={setPromptType} disabled={controlsDisabled} />
+        </div>
+        <div
+          className="apple-glass-tab apple-glass-tab--left -left-[26px] top-1/2 -translate-y-1/2 w-[36px] h-[158px] flex items-center justify-start pl-[7px]"
+          aria-hidden
+        >
+          <span className="overlay-wordmark text-[10px] uppercase font-medium text-white/55 select-none">
+            PromptForge
+          </span>
+        </div>
+        <div className="apple-glass-tab apple-glass-tab--bottom -bottom-[22px] left-14 h-[32px] px-5 pb-[4px] flex items-end text-white">
+          <ModelPicker model={model} onChange={setModel} disabled={controlsDisabled} />
+        </div>
+
+        <div ref={menuRef} className="absolute -right-[26px] top-6 z-20">
           <button
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
-            className="p-1.5 rounded-full text-white/80 hover:text-white hover:bg-white/20 transition"
+            className="p-0 rounded-full text-white/80 hover:text-white hover:bg-white/20 transition"
             aria-label="More options"
+            aria-haspopup="menu"
             aria-expanded={menuOpen}
           >
             <MoreIcon />
           </button>
           {menuOpen && (
-            <div className="apple-glass-menu absolute right-0 mt-1 min-w-[180px] rounded-xl py-2 text-white">
+            <div className="apple-glass-menu absolute right-0 top-full mt-1 min-w-[180px] rounded-xl py-2 text-white">
               <div className="px-3 pb-2">
                 <div className="text-[10px] uppercase tracking-wider text-white/50 mb-2">Position</div>
                 <OverlayPlacementPicker value={overlayPlacement} onChange={onPlacementChange} />
@@ -504,6 +595,21 @@ export function Overlay() {
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  api.openStudioWorkbench({
+                    originalText: prompt,
+                    optimizedText: outputText.trim() ? outputText : undefined,
+                    model,
+                    level,
+                  });
+                }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
+              >
+                Open in Studio
+              </button>
+              <button
+                type="button"
                 onClick={() => api.hideOverlay()}
                 className="w-full text-left px-3 py-2 text-sm text-white/70 hover:bg-white/10"
               >
@@ -513,19 +619,20 @@ export function Overlay() {
           )}
         </div>
 
-        <div className="apple-glass relative rounded-[34px] w-full p-4 text-white">
-        {captureFailed ? (
-          <div className="apple-glass-panel rounded-[26px] p-4 text-sm text-warn">
-            {terminalContext
-              ? "Select terminal text or type at the prompt, then press the hotkey."
-              : "Could not capture text. Make sure the cursor is in a text field."}
-          </div>
-        ) : (
+        <div className="apple-glass relative z-10 rounded-[34px] w-full p-4 text-white">
           <>
+            {captureFailed && (
+              <div className="mb-3 px-1 text-[13px] text-warn" role="status">
+                {terminalContext
+                  ? "Select terminal text or type at the prompt, then press the hotkey."
+                  : "Nothing captured — type a prompt below, or click into a text field and press Ctrl+Shift+O again."}
+              </div>
+            )}
             <div className="flex gap-4 mb-4 items-start">
               <div className="flex-1 flex flex-col gap-3">
                 <div className="apple-glass-panel rounded-[26px] h-[88px] overflow-hidden">
                   <textarea
+                    ref={promptRef}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     readOnly={busy || capturing}
@@ -577,12 +684,20 @@ export function Overlay() {
 
             <div className="flex items-center gap-3 px-1 min-h-[36px]">
               <div className="flex items-center gap-3 min-w-0">
-                <ModelPicker model={model} onChange={setModel} disabled={controlsDisabled} />
                 <span className="sr-only">{modelLabel}</span>
                 {applyNotice && (
                   <span className="text-[13px] text-warn truncate" role="status">
                     {applyNotice}
                   </span>
+                )}
+                {keyMissingError && (
+                  <button
+                    type="button"
+                    onClick={() => api.openSettings()}
+                    className="text-[13px] text-warn underline underline-offset-2 hover:opacity-80 transition shrink-0"
+                  >
+                    Open Settings →
+                  </button>
                 )}
               </div>
 
@@ -594,16 +709,15 @@ export function Overlay() {
                 >
                   Discard
                 </button>
-                <GlassPill onClick={onApply} disabled={!canApplyOrCopy}>
+                <GlassPill onClick={onApply} disabled={!canApply}>
                   Apply
                 </GlassPill>
-                <GlassPill onClick={() => void onCopy()} disabled={!canApplyOrCopy}>
+                <GlassPill onClick={() => void onCopy()} disabled={!canCopy}>
                   Copy
                 </GlassPill>
               </div>
             </div>
           </>
-        )}
         </div>
       </div>
     </div>

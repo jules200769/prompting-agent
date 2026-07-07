@@ -90,6 +90,17 @@ function createBrowserMock(): PromptForgeAPI {
     openSettings: () => {
       window.location.hash = "#/studio/settings";
     },
+    finishOnboarding: () => {
+      console.info("[promptforge mock] finishOnboarding called — no-op in browser preview");
+    },
+    openExternal: async (url: string) => {
+      window.open(url, "_blank", "noopener");
+      return true;
+    },
+    openStudioWorkbench: () => {
+      window.location.hash = "#/studio";
+    },
+    onStudioWorkbench: () => () => undefined,
     hideOverlay: () => {
       console.info("[promptforge mock] hideOverlay called — no-op in browser preview");
     },

@@ -2,7 +2,7 @@
 // model's prompting guide supplies the prompt-engineering methodology.
 
 import OpenAI from "openai";
-import type { ModelId, OptLevel } from "../shared/types";
+import type { ModelId, OptLevel, PromptType } from "../shared/types";
 import { REWRITE_CONFIG } from "../shared/types";
 import { getPack } from "./packs";
 import { getGuideExcerpt, getLevelRewriteInstruction, getLevelStructureContract } from "./guideLoader";
@@ -16,6 +16,8 @@ export interface OptimizeParams {
   apiKey: string;
   /** Shell/terminal paste: force single-line plain output. */
   terminalContext?: boolean;
+  /** Overlay type hint; "auto"/undefined adds nothing. */
+  promptType?: PromptType;
 }
 
 export interface StreamCallbacks {
@@ -37,6 +39,24 @@ export function buildMetaPrompt(params: Omit<OptimizeParams, "apiKey">): { syste
   const contextLine = params.context?.trim()
     ? `Standing context to incorporate where relevant: ${params.context.trim()}`
     : "";
+  const PROMPT_TYPE_RULES: Partial<Record<PromptType, string>> = {
+    question: `
+PROMPT TYPE — QUESTION (user-selected):
+- The user's text is a question for the AI. Keep the refined prompt in question form — sharp, answerable, with the needed context
+- Do not convert it into a task briefing or deliverable request
+`,
+    prompt: `
+PROMPT TYPE — TASK PROMPT (user-selected):
+- The user's text is a task prompt. Refine it as a direct, actionable instruction with a clear deliverable
+`,
+    letter: `
+PROMPT TYPE — WRITTEN MESSAGE (user-selected):
+- The deliverable is a written message (email, letter, or reply). The refined prompt must instruct the model to write that message
+- Preserve the user's stated facts, audience, and tone constraints exactly
+`,
+  };
+  const promptTypeRule =
+    params.promptType && params.promptType !== "auto" ? (PROMPT_TYPE_RULES[params.promptType] ?? "") : "";
   const actionLanguageRule =
     params.level >= 2
       ? `
@@ -118,7 +138,7 @@ ${guide}
 ${levelLine}
 
 ${structureBlock}
-${terminalOutputRule}${actionLanguageRule}${constraintFramingRule}${gptOutcomeFirstRule}${composerStructureRule}${grokStructureRule}${geminiStructureRule}
+${terminalOutputRule}${promptTypeRule}${actionLanguageRule}${constraintFramingRule}${gptOutcomeFirstRule}${composerStructureRule}${grokStructureRule}${geminiStructureRule}
 ${personaLine}${personaLine ? "\n" : ""}${contextLine}
 
 OUTPUT RULES (strict):

@@ -117,6 +117,44 @@ body {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
 }
 
+/* Folder tabs tucked behind the glass card — near-opaque (nothing behind the card
+   to blur), matching the shell's edge tones. The ::before paints an organic
+   folder-tab shape (SVG path: S-curve sides that slide into the card, rounded
+   shoulders, stroke following the curve) so the tab content stays unwarped.
+   Bottom/right variants reuse the top/left artwork mirrored via transform. */
+.apple-glass-tab {
+  position: absolute;
+  z-index: 0;
+}
+
+.apple-glass-tab::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: center / 100% 100% no-repeat;
+  filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.4));
+}
+
+.apple-glass-tab--top::before,
+.apple-glass-tab--bottom::before {
+  background-image: url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none' viewBox='0 0 100 40'><defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='%23282830' stop-opacity='0.97'/><stop offset='1' stop-color='%2318181e' stop-opacity='0.97'/></linearGradient></defs><path d='M0 40 C10 40 16 0 26 0 L74 0 C84 0 90 40 100 40 Z' fill='url(%23g)' stroke='rgba(255,255,255,0.22)' vector-effect='non-scaling-stroke'/></svg>");
+}
+
+.apple-glass-tab--bottom::before {
+  transform: scaleY(-1);
+}
+
+.apple-glass-tab--left::before {
+  background-image: url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none' viewBox='0 0 40 100'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='0'><stop offset='0' stop-color='%23282830' stop-opacity='0.97'/><stop offset='1' stop-color='%2318181e' stop-opacity='0.97'/></linearGradient></defs><path d='M40 0 C40 8 0 12 0 22 L0 78 C0 88 40 92 40 100 Z' fill='url(%23g)' stroke='rgba(255,255,255,0.22)' vector-effect='non-scaling-stroke'/></svg>");
+}
+
+.overlay-wordmark {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  letter-spacing: 0.14em;
+}
+
 .apple-glass-pill {
   background: rgba(255, 255, 255, 0.52);
   backdrop-filter: blur(16px) saturate(180%);
@@ -133,6 +171,30 @@ body {
 
 .apple-glass-pill:active:not(:disabled) {
   transform: scale(0.98);
+}
+
+/* Keyboard focus visibility — never outline-none without a replacement ring. */
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.3);
+  outline-offset: 2px;
+}
+
+.apple-glass-pill:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+/* Textareas suppress their own outline; the panel shows focus instead. */
+.apple-glass-panel:focus-within {
+  box-shadow:
+    inset 0 1px 4px rgba(0, 0, 0, 0.5),
+    0 0 0 2px rgba(255, 255, 255, 0.3);
+}
+
+.overlay-placement__zone:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.4);
+  outline-offset: 1px;
 }
 
 /* Level slider — Apple-style sliding track */
@@ -218,9 +280,9 @@ body {
 }
 
 .overlay-placement__zone--selected {
-  background: rgba(99, 102, 241, 0.55);
-  border-color: rgba(129, 140, 248, 0.9);
-  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.5);
+  background: rgba(124, 108, 255, 0.55); /* accent #7c6cff */
+  border-color: rgba(157, 146, 255, 0.9); /* accent-soft #9d92ff */
+  box-shadow: 0 0 0 1px rgba(157, 146, 255, 0.5);
 }
 
 .overlay-placement__zone--tl {

@@ -1,6 +1,6 @@
 // Preload: exposes a tight allowlist IPC API to the renderer. No Node globals leak.
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type OptimizeRequest, type AppSettings, type CaptureMode, type InjectResult, type OverlayPlacement, type Provider } from "../shared/types";
+import { IPC, type OptimizeRequest, type AppSettings, type CaptureMode, type InjectResult, type OverlayPlacement, type Provider, type WorkbenchSeed } from "../shared/types";
 
 type OverlayShowPayload = {
   text: string;
@@ -43,6 +43,14 @@ ipcRenderer.on(IPC.OVERLAY_CLEAR, () => {
   for (const cb of overlayClearCallbacks) cb();
 });
 
+// Workbench seed can arrive before the lazy Studio view mounts — cache and replay.
+const workbenchSeedCallbacks = new Set<(seed: WorkbenchSeed) => void>();
+let lastWorkbenchSeed: WorkbenchSeed | null = null;
+ipcRenderer.on(IPC.STUDIO_WORKBENCH_SEED, (_e, seed: WorkbenchSeed) => {
+  lastWorkbenchSeed = seed;
+  for (const cb of workbenchSeedCallbacks) cb(seed);
+});
+
 const api = {
   optimize: (req: OptimizeRequest, onText: (chunk: string) => void) => {
     const listener = (_e: unknown, chunk: string) => onText(chunk);
@@ -76,6 +84,16 @@ const api = {
 
   openStudio: () => ipcRenderer.send(IPC.STUDIO_SHOW),
   openSettings: () => ipcRenderer.send(IPC.STUDIO_SETTINGS),
+  finishOnboarding: () => ipcRenderer.send(IPC.ONBOARDING_FINISH),
+  openExternal: (url: string) => ipcRenderer.invoke(IPC.SHELL_OPEN_EXTERNAL, url) as Promise<boolean>,
+  openStudioWorkbench: (seed: WorkbenchSeed) => ipcRenderer.send(IPC.STUDIO_OPEN_WORKBENCH, seed),
+  onStudioWorkbench: (cb: (seed: WorkbenchSeed) => void): (() => void) => {
+    workbenchSeedCallbacks.add(cb);
+    if (lastWorkbenchSeed) cb(lastWorkbenchSeed);
+    return () => {
+      workbenchSeedCallbacks.delete(cb);
+    };
+  },
   hideOverlay: () => ipcRenderer.send(IPC.OVERLAY_HIDE),
   overlayPrepared: () => ipcRenderer.send(IPC.OVERLAY_PREPARED),
   setOverlayPlacement: (placement: OverlayPlacement) =>

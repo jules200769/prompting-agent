@@ -174,6 +174,34 @@ describe("buildMetaPrompt", () => {
     expect(hot.system).toContain("QUALITY BAR");
     expect(hot.system.toLowerCase()).toContain("never xml");
   });
+
+  it("adds the prompt-type rule only for explicit non-auto types", async () => {
+    const { buildMetaPrompt } = await import("./providers");
+    const base = { prompt: "tell my team the roadmap slips", model: "claude-opus-4.8" as const, level: 2 as const };
+    const auto = buildMetaPrompt({ ...base, promptType: "auto" });
+    const none = buildMetaPrompt(base);
+    const letter = buildMetaPrompt({ ...base, promptType: "letter" });
+    const question = buildMetaPrompt({ ...base, promptType: "question" });
+    expect(auto.system).not.toContain("PROMPT TYPE");
+    expect(none.system).not.toContain("PROMPT TYPE");
+    expect(auto.system).toBe(none.system);
+    expect(letter.system).toContain("PROMPT TYPE — WRITTEN MESSAGE");
+    expect(question.system).toContain("PROMPT TYPE — QUESTION");
+  });
+
+  it("keeps the terminal single-line rule with an explicit prompt type", async () => {
+    const { buildMetaPrompt } = await import("./providers");
+    const { system } = buildMetaPrompt({
+      prompt: "find big files",
+      model: "claude-opus-4.8",
+      level: 3,
+      terminalContext: true,
+      promptType: "question",
+    });
+    expect(system).toContain("TERMINAL SHELL");
+    expect(system).toContain("SINGLE line");
+    expect(system).toContain("PROMPT TYPE — QUESTION");
+  });
 });
 
 describe("optimizeLocal", () => {

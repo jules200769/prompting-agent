@@ -3,11 +3,13 @@ import { Overlay } from "./views/Overlay";
 import { isBrowserMock } from "./api";
 
 const Studio = lazy(() => import("./views/Studio").then((m) => ({ default: m.Studio })));
+const Onboarding = lazy(() => import("./views/Onboarding").then((m) => ({ default: m.Onboarding })));
 
-function route(): "studio" | "overlay-preview" | "overlay" {
+function route(): "studio" | "overlay-preview" | "onboarding" | "overlay" {
   const h = window.location.hash.replace(/^#/, "");
   if (h.startsWith("/studio")) return "studio";
   if (h.startsWith("/overlay-preview")) return "overlay-preview";
+  if (h.startsWith("/onboarding")) return "onboarding";
   return "overlay";
 }
 
@@ -49,6 +51,13 @@ export function Router() {
     return (
       <Suspense fallback={null}>
         <Studio />
+      </Suspense>
+    );
+  }
+  if (r === "onboarding") {
+    return (
+      <Suspense fallback={null}>
+        <Onboarding />
       </Suspense>
     );
   }
