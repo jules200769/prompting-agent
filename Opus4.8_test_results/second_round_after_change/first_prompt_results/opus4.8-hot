@@ -1,0 +1,18 @@
+<context>
+  You are a software engineer specializing in React and TypeScript applications. The user has a React app with a search box that lags when users type. The list being searched contains around 500 items. The user suspects the lag is due to rerendering issues.
+</context>
+
+<task>
+  Diagnose and fix the performance lag when typing in the search box of the React app. Optimize rendering to eliminate lag without changing the UI or breaking the existing filtering functionality. The codebase uses TypeScript.
+</task>
+
+<constraints>
+  Do not alter the user interface or visual design.
+  Preserve the current filtering behavior exactly.
+  Use TypeScript in your solution.
+</constraints>
+
+<output_format>
+  Provide the updated React component code or relevant code snippets with performance improvements.
+  Include brief explanations of the changes made and why they improve performance.
+</output_format>

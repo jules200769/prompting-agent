@@ -1,0 +1,30 @@
+Task: Write an email to my team informing them that our Q3 roadmap is delayed by 3 weeks due to a vendor delay.
+
+Context:
+- The delay is caused by an external vendor issue.
+- The audience is my internal team who needs clear, professional communication.
+- The tone should be professional but approachable—neither too corporate nor stiff.
+- I have a mitigation plan in progress but the details are not finalized yet.
+- The team needs to understand what aspects of the roadmap are changing and which remain unchanged.
+
+Constraints:
+- Maintain a professional yet conversational tone.
+- Avoid assigning blame to the vendor or any team members; use neutral, forward-looking language.
+- Clearly state the 3-week delay and acknowledge the vendor delay factually.
+- Mention the mitigation plan is underway but details are pending.
+- Emphasize transparency about what is changing and what stays the same.
+- Keep the email concise and focused.
+
+Output format:
+- A complete email text suitable for internal team communication.
+
+Examples:
+- "Due to a vendor delay, our Q3 roadmap timeline will shift by approximately three weeks."
+- "We are actively working on a mitigation plan to address this delay; I will share details once finalized."
+- "Key deliverables scheduled for Q3 will be adjusted accordingly, while some milestones remain on track."
+
+Success criteria:
+- The email clearly communicates the 3-week delay and its cause without blaming anyone.
+- The tone is professional but not overly formal or stiff.
+- The message includes mention of a mitigation plan with pending details.
+- The team understands what changes and what stays the same in the roadmap.

@@ -1,0 +1,29 @@
+## Context  
+You need to communicate a delay in the Q3 roadmap to your team caused by a vendor-related issue. The message should maintain professionalism without sounding overly formal or stiff. It should avoid assigning blame to the vendor or team members.  
+
+## Task  
+Write an email to your team informing them that the Q3 roadmap is delayed by three weeks due to a vendor delay. Clearly explain what aspects of the plan are changing and which remain unchanged. Mention that a mitigation plan is in development but details are not yet finalized.  
+
+## Constraints  
+- Maintain a professional but approachable tone—avoid overly corporate or stiff language.  
+- Do not assign blame to the vendor or any team member.  
+- Be transparent about the delay and the current status of the mitigation plan without overpromising.  
+
+## Output format  
+A concise, clear email addressed to your team that:  
+- Announces the three-week delay in the Q3 roadmap due to vendor-related reasons.  
+- Explains what is changing and what remains the same in the roadmap.  
+- States that a mitigation plan is underway but details are pending.  
+- Maintains a professional, respectful, and balanced tone without blaming.  
+
+## Goal  
+Ensure the team understands the delay, the impact on the roadmap, and that a mitigation plan is forthcoming, while preserving team morale and trust.  
+
+## Success criteria  
+- The email clearly communicates the delay and its cause without blame.  
+- The team is informed about changes and continuities in the roadmap.  
+- The message conveys that a mitigation plan exists but is not yet finalized.  
+- The tone is professional, approachable, and avoids stiffness or corporate jargon.  
+
+## Stop rules  
+Do not add blame or speculation about causes beyond the vendor delay. Do not finalize or speculate on mitigation plan details.

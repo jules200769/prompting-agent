@@ -1,0 +1,27 @@
+Context:
+You need to communicate to your team about a delay in the Q3 roadmap caused by a vendor issue. The message should be professional yet approachable, avoiding blame toward the vendor or team members. You want to inform them about the delay, the existence of a mitigation plan (though details are not finalized), and clarify what aspects of the roadmap are changing versus what remains unchanged.
+
+Task:
+Write an email to your team explaining that the Q3 roadmap is delayed by three weeks due to a vendor delay. Maintain a professional but approachable tone that is not overly corporate or stiff. Clearly communicate the changes and what remains the same. Mention that a mitigation plan is in place but its details are still being finalized. Avoid assigning blame to the vendor or any team members.
+
+Constraints:
+- Use a professional yet conversational tone, avoiding stiffness or overly corporate language.
+- Do not assign blame to the vendor or team members; use neutral, forward-looking language.
+- Clearly state the three-week delay and its impact on the roadmap.
+- Mention the mitigation plan exists but details are not finalized.
+- Specify what parts of the roadmap are changing and what parts remain unchanged.
+- Keep the message concise and clear.
+
+Output:
+An email draft to the team fulfilling the above requirements.
+
+Examples:
+1. "Our Q3 roadmap will be delayed by three weeks due to unforeseen vendor-related timing. We have a mitigation plan underway, though I am still finalizing the details. I want to assure you that while some timelines are shifting, our key priorities remain intact."
+2. "While the vendor delay has pushed our Q3 timeline back by three weeks, we are actively working on solutions to keep us on track. I will share more about the mitigation plan once it is finalized. Please note that some deliverables will adjust, but many will proceed as planned."
+
+Success Criteria:
+- The email uses a professional but approachable tone without sounding stiff or overly formal.
+- The message clearly communicates the three-week delay and its cause without blaming anyone.
+- The existence of a mitigation plan is mentioned with acknowledgment that details are pending.
+- The email clearly distinguishes between what is changing and what remains the same in the roadmap.
+- The email is concise, clear, and suitable for a team update.

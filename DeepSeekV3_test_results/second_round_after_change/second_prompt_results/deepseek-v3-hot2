@@ -1,0 +1,16 @@
+Task: Write an email to the team about the Q3 roadmap delay.
+
+Context:
+- The Q3 roadmap is slipping by 3 weeks due to a vendor delay.
+- The audience is the internal team responsible for the roadmap.
+- The email should communicate changes clearly and maintain team morale.
+- A mitigation plan exists but its details are not finalized.
+
+Constraints:
+- Use a professional tone that is approachable and not overly corporate or stiff.
+- Avoid assigning blame to the vendor or any team members.
+- Clearly explain what aspects of the roadmap are changing and what remain unchanged.
+- Mention the existence of a mitigation plan without providing finalized details.
+
+Output format:
+- A concise, clear email text suitable for internal team communication.

@@ -1,0 +1,19 @@
+GOAL:
+Write a professional, clear email to the team explaining the Q3 roadmap delay by 3 weeks due to a vendor delay, without assigning blame.
+
+CONTEXT:
+- Audience: internal team members
+- Inputs: Q3 roadmap delay of 3 weeks caused by vendor delay, mitigation plan in progress but not finalized
+- Constraints: tone professional yet approachable (not too corporate or stiff), avoid blaming vendor or team members, clearly communicate what is changing and what remains the same
+
+OUTPUT FORMAT:
+- Email subject line
+- Email body with introduction, explanation of delay, mention of mitigation plan pending details, clear summary of changes and unchanged items, and a positive closing
+
+QUALITY BAR:
+- Include clear explanation of delay without blame
+- Include acknowledgment of mitigation plan status
+- Clearly differentiate what is changing and what remains the same
+- Use professional but approachable tone
+- Avoid blaming language or overly formal corporate tone
+- If uncertain about details, state that mitigation plan details are forthcoming

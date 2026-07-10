@@ -1,0 +1,1 @@
+My React app lags when users type in the search box. The list has around 500 items. It is probably a rerender issue. Fix it but don't change the UI or break filtering. The app uses TypeScript.

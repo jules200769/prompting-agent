@@ -1,0 +1,41 @@
+GOAL:
+Write a professional yet approachable email to my team explaining that our Q3 roadmap is delayed by three weeks due to a vendor delay.
+
+CONTEXT:
+- Audience: internal team members
+- Inputs: Q3 roadmap status update, vendor delay causing a 3-week slip, mitigation plan in progress but not finalized
+- Constraints: tone should be professional but not overly corporate or stiff; avoid blaming the vendor or any team members; clearly communicate what is changing and what remains the same
+
+OUTPUT FORMAT:
+- Email subject line
+- Email body structured with: greeting, explanation of delay, assurance about mitigation plan, summary of changes and unchanged elements, closing remarks
+
+QUALITY BAR:
+- Include a clear explanation of the delay without assigning blame
+- Mention the mitigation plan is underway but details are pending
+- Clearly outline what aspects of the roadmap are affected and what remain unchanged
+- Use a tone that is professional, transparent, and approachable
+- Avoid corporate jargon, blame, or overly formal language
+
+<examples>
+Subject: Update on Q3 Roadmap Timeline
+
+Hi Team,
+
+I want to update you on a change to our Q3 roadmap timeline. Due to an unexpected vendor delay, our schedule will shift by approximately three weeks. We are actively working on a mitigation plan to address this, though the details are still being finalized.
+
+While this impacts some deliverables, several key milestones remain on track. I’ll share more specifics as soon as the plan is solidified.
+
+Thanks for your understanding and continued focus.
+
+Best,  
+[Your Name]
+</examples>
+
+<success_criteria>
+- The email clearly states the three-week delay and its cause without blaming anyone  
+- The mitigation plan is acknowledged as in progress but not yet finalized  
+- The message specifies what changes and what stays the same in the roadmap  
+- The tone remains professional and approachable, avoiding stiffness or corporate jargon  
+- The email structure includes subject line, greeting, body with key points, and closing  
+</success_criteria>

@@ -1,0 +1,14 @@
+Context:
+You have a React application with a search box that lags when users type. The list being filtered contains around 500 items. The issue is likely related to rerendering performance. The application is written in TypeScript.
+
+Task:
+Identify and fix the performance issue causing lag during typing in the search box. Optimize the rendering to prevent lag without changing the user interface or breaking the existing filtering functionality.
+
+Constraints:
+- Do not modify the UI design or layout.
+- Preserve the current filtering behavior exactly.
+- Use TypeScript in the solution.
+- Focus on improving rendering performance to eliminate lag.
+
+Output:
+Provide a TypeScript-based fix or optimization for the React app that resolves the lag issue during typing in the search box while maintaining the UI and filtering intact.

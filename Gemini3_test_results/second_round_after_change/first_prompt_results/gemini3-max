@@ -1,0 +1,25 @@
+Context:
+You have a React application with a search box that lags when users type. The list being filtered contains around 500 items. The issue is likely related to rerendering performance.
+
+Task:
+Identify and fix the performance issue causing lag during typing in the search box. Optimize the React app to prevent unnecessary rerenders without changing the user interface or breaking the existing filtering functionality. The codebase uses TypeScript.
+
+Constraints:
+- Do not alter the UI design or appearance.
+- Preserve the current filtering behavior exactly.
+- Maintain TypeScript usage and typing accuracy.
+- Use positive language focusing on optimizing rendering and preserving functionality.
+
+Output:
+Provide a detailed explanation and code modifications that improve performance by minimizing rerenders during typing in the search box, ensuring the UI and filtering remain unchanged.
+
+Examples:
+- Implement React.memo or useMemo to prevent unnecessary rerenders of list items.
+- Debounce the input handler to reduce update frequency without affecting filtering responsiveness.
+- Use key props correctly to optimize list rendering.
+
+Success Criteria:
+- The search box no longer lags when typing with a list of approximately 500 items.
+- The UI appearance remains identical to the original.
+- Filtering results remain accurate and unchanged.
+- The solution is implemented in TypeScript with proper typings.

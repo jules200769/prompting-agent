@@ -1,0 +1,29 @@
+GOAL:
+Fix the input lag in the search box of my React app caused by rendering performance issues.
+
+CONTEXT:
+- Audience: React and TypeScript developers maintaining the app
+- Inputs: React app with a search box filtering a list of about 500 items
+- Constraints: Do not change the UI design or break the existing filtering functionality; maintain TypeScript usage
+
+OUTPUT FORMAT:
+- Revised React component code or relevant code snippets
+- Explanation of the changes made to improve performance
+- Suggestions for verifying that filtering and UI remain unchanged
+
+QUALITY BAR:
+- Include: clear performance improvements addressing rerender issues, preservation of current UI and filtering behavior, TypeScript compatibility
+- Avoid: altering UI layout or styling, removing or changing filtering logic, introducing new UI elements
+- If uncertain: prioritize maintaining existing UI and filtering functionality while improving input responsiveness
+
+EXAMPLES:
+- Refactor to use React.memo or useCallback to prevent unnecessary rerenders
+- Implement virtualization or windowing techniques if applicable without UI changes
+- Optimize state management to minimize updates on each keystroke
+
+SUCCESS CRITERIA:
+- Input lag is significantly reduced or eliminated during typing
+- Filtering results remain accurate and consistent with current behavior
+- UI appearance and layout remain identical to the original
+
+Verification complete.
