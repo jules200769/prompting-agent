@@ -10,7 +10,7 @@ import {
 import { flushSync } from "react-dom";
 import { api } from "../api";
 import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
-import type { CaptureMode, ModelId, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
+import type { CaptureContext, CaptureMode, ModelId, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
 import { MODELS, LEVEL_LABELS, LEVEL_COLORS, PROMPT_TYPES, PROMPT_TYPE_LABELS } from "../../shared/types";
 import { toTerminalSingleLine, stripTerminalStreamChunk } from "../../shared/terminalOutput";
 import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
@@ -306,12 +306,15 @@ export function Overlay() {
   const [shellVisible, setShellVisible] = useState(false);
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [terminalContext, setTerminalContext] = useState(false);
+  const [suggestedModel, setSuggestedModel] = useState<ModelId | null>(null);
   const captureRef = useRef<{
     text: string;
     mode: CaptureMode;
     snapshot: { text: string; hasText: boolean };
     terminalContext?: boolean;
+    context?: CaptureContext;
   } | null>(null);
+  const defaultModelRef = useRef<ModelId>("claude-opus-4.8");
   const menuRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLTextAreaElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -346,6 +349,7 @@ export function Overlay() {
       setApplyNotice(null);
       setTerminalContext(false);
       setPromptType("auto");
+      setSuggestedModel(null);
       setShellVisible(false);
     });
     ackOverlayPrepared();
@@ -354,6 +358,7 @@ export function Overlay() {
   useEffect(() => {
     (async () => {
       const s = await api.settingsGet();
+      defaultModelRef.current = s.defaultModel;
       setModel(s.defaultModel);
       setLevel(s.defaultLevel);
       setOverlayPlacement(s.overlayPlacement);
@@ -364,6 +369,7 @@ export function Overlay() {
       mode: CaptureMode;
       snapshot: { text: string; hasText: boolean };
       terminalContext?: boolean;
+      context?: CaptureContext;
     }) => {
       flushSync(() => {
         captureRef.current = {
@@ -371,7 +377,12 @@ export function Overlay() {
           mode: detail.mode,
           snapshot: detail.snapshot ?? { text: "", hasText: false },
           terminalContext: detail.terminalContext,
+          context: detail.context,
         };
+        // Destination-aware model preselect: suggestion wins for this session,
+        // manual pick afterwards wins for the run; defaultModel is never written.
+        setSuggestedModel(detail.context?.suggestedModel ?? null);
+        setModel(detail.context?.suggestedModel ?? defaultModelRef.current);
         setMode(detail.mode);
         setTerminalContext(Boolean(detail.terminalContext));
         setPromptType("auto");
@@ -431,7 +442,15 @@ export function Overlay() {
     setOutputText("");
     try {
       const res = await api.optimize(
-        { prompt, model, level, skipCache: hasGenerated, terminalContext: isTerminalSession, promptType },
+        {
+          prompt,
+          model,
+          level,
+          skipCache: hasGenerated,
+          terminalContext: isTerminalSession,
+          promptType,
+          captureContext: captureRef.current?.context,
+        },
         isTerminalSession ? (chunk) => appendTarget(stripTerminalStreamChunk(chunk)) : appendTarget,
       );
       const refined = isTerminalSession ? toTerminalSingleLine(res.optimizedPrompt) : res.optimizedPrompt;
@@ -561,10 +580,6 @@ export function Overlay() {
             PromptForge
           </span>
         </div>
-        <div className="apple-glass-tab apple-glass-tab--bottom -bottom-[22px] left-14 h-[32px] px-5 pb-[4px] flex items-end text-white">
-          <ModelPicker model={model} onChange={setModel} disabled={controlsDisabled} />
-        </div>
-
         <div ref={menuRef} className="absolute -right-[26px] top-6 z-20">
           <button
             type="button"
@@ -625,7 +640,7 @@ export function Overlay() {
               <div className="mb-3 px-1 text-[13px] text-warn" role="status">
                 {terminalContext
                   ? "Select terminal text or type at the prompt, then press the hotkey."
-                  : "Nothing captured — type a prompt below, or click into a text field and press Ctrl+Shift+O again."}
+                  : "Nothing captured — type a prompt below, or click into a text field and press the hotkey again."}
               </div>
             )}
             <div className="flex gap-4 mb-4 items-start">
@@ -684,6 +699,12 @@ export function Overlay() {
 
             <div className="flex items-center gap-3 px-1 min-h-[36px]">
               <div className="flex items-center gap-3 min-w-0">
+                <ModelPicker model={model} onChange={setModel} disabled={controlsDisabled} />
+                {suggestedModel != null && model === suggestedModel && (
+                  <span className="text-[10px] uppercase tracking-wider text-white/45 select-none" title="Suggested from the destination app">
+                    auto
+                  </span>
+                )}
                 <span className="sr-only">{modelLabel}</span>
                 {applyNotice && (
                   <span className="text-[13px] text-warn truncate" role="status">

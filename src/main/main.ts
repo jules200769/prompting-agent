@@ -1,8 +1,9 @@
 // Electron main: lifecycle, overlay + studio windows, tray, global hotkey, IPC.
 import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell, screen } from "electron";
 import { join } from "node:path";
-import { IPC, type AppSettings, type CaptureMode, type OptimizeRequest, type OverlayPlacement, type Provider, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
+import { DEFAULT_SETTINGS, IPC, type AppSettings, type CaptureContext, type CaptureMode, type HotkeyStatus, type OptimizeRequest, type OverlayPlacement, type Provider, type SettingsSetResult, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
 import { resolveOverlayPosition } from "../shared/overlayPosition";
+import { acceleratorDisplayParts, normalizeAccelerator } from "../shared/accelerator";
 import { analyze } from "../engine/orchestrator";
 import * as store from "./storage";
 import { keyStore } from "./keyStore";
@@ -51,6 +52,7 @@ let pendingCapture: {
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
+  context?: CaptureContext;
 } | null = null;
 let isOptimizing = false;
 let hotkeyInFlight = false;
@@ -198,6 +200,7 @@ async function deliverCaptureToOverlay(capture: {
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
+  context?: CaptureContext;
 }): Promise<void> {
   if (!overlay) overlay = createOverlay();
   if (overlay.webContents.isLoading()) {
@@ -216,6 +219,7 @@ async function deliverCaptureToOverlay(capture: {
     mode: capture.mode,
     snapshot: capture.snapshot,
     terminalContext: capture.terminalContext ?? false,
+    context: capture.context,
   });
   await prepared;
   overlay.setOpacity(1);
@@ -350,6 +354,18 @@ async function showOverlayShell(): Promise<void> {
   overlaySessionOpen = true;
 }
 
+/** TEMP: dev-only — remove when context-layer manual testing is done. */
+function logCaptureContextDev(context: CaptureContext | undefined): void {
+  if (context) {
+    console.log("[PromptForge] captureContext:\n", JSON.stringify(context, null, 2));
+    return;
+  }
+  const screenOn = store.getSettings().screenContext;
+  console.log(
+    `[PromptForge] captureContext: null (${screenOn ? "password field or no destination signals" : "screenContext off"})`,
+  );
+}
+
 async function triggerHotkey(): Promise<void> {
   if (hotkeyInFlight || isOptimizing) return;
   if (overlaySessionOpen) {
@@ -378,7 +394,10 @@ async function triggerHotkey(): Promise<void> {
 
     const tCap = isDev ? Date.now() : 0;
     const capture = await captureSelection();
-    if (isDev) console.log(`[PromptForge] capture: ${Date.now() - tCap}ms`);
+    if (isDev) {
+      console.log(`[PromptForge] capture: ${Date.now() - tCap}ms`);
+      logCaptureContextDev(capture.context);
+    }
 
     const tDeliver = isDev ? Date.now() : 0;
     await deliverCaptureToOverlay(capture);
@@ -391,12 +410,53 @@ async function triggerHotkey(): Promise<void> {
   }
 }
 
-function registerHotkey(settings: AppSettings): void {
-  globalShortcut.unregisterAll();
-  const ok = globalShortcut.register(settings.hotkey, () => {
-    void triggerHotkey();
-  });
-  if (!ok) console.warn(`PromptForge: failed to register hotkey ${settings.hotkey}`);
+/** The accelerator currently registered with the OS, or null when none is. */
+let activeHotkey: string | null = null;
+
+function updateTrayTooltip(hotkey: string): void {
+  tray?.setToolTip(`PromptForge — ${acceleratorDisplayParts(hotkey).join("+")}`);
+}
+
+/**
+ * Register `accelerator` as the global hotkey. Never throws and never leaves
+ * the app hotkey-less: on failure the previous hotkey is restored best-effort.
+ */
+function applyHotkey(accelerator: string): { ok: boolean; error?: string } {
+  const norm = normalizeAccelerator(accelerator);
+  if (!norm) return { ok: false, error: `"${accelerator}" is not a valid hotkey` };
+  if (norm === activeHotkey && globalShortcut.isRegistered(norm)) return { ok: true };
+
+  const prev = activeHotkey;
+  const register = (acc: string): boolean => {
+    try {
+      return globalShortcut.register(acc, () => {
+        void triggerHotkey();
+      });
+    } catch (e) {
+      console.warn(`PromptForge: hotkey "${acc}" rejected:`, e);
+      return false;
+    }
+  };
+
+  if (prev) {
+    try {
+      globalShortcut.unregister(prev);
+    } catch {
+      /* already gone */
+    }
+  }
+  if (!register(norm)) {
+    if (prev && register(prev)) {
+      console.warn(`PromptForge: failed to register hotkey ${norm}; kept ${prev}`);
+    } else {
+      activeHotkey = null;
+      console.warn(`PromptForge: failed to register hotkey ${norm}`);
+    }
+    return { ok: false, error: "already in use by another application" };
+  }
+  activeHotkey = norm;
+  updateTrayTooltip(norm);
+  return { ok: true };
 }
 
 function buildTray(): void {
@@ -417,7 +477,7 @@ function buildTray(): void {
     { label: "Quit", click: () => app.quit() },
   ]);
   tray.setContextMenu(menu);
-  tray.setToolTip("PromptForge — Ctrl+Shift+O");
+  updateTrayTooltip(store.getSettings().hotkey);
 }
 
 // ---------- IPC handlers ----------
@@ -477,11 +537,36 @@ function registerIpc(): void {
       throw e;
     }
   });
-  ipcMain.handle(IPC.SETTINGS_SET, (_evt, s: AppSettings) => {
-    store.setSettings(s);
-    registerHotkey(s);
-    return true;
+  ipcMain.handle(IPC.SETTINGS_SET, (_evt, s: AppSettings): SettingsSetResult => {
+    const prev = store.getSettings();
+    const norm = normalizeAccelerator(s.hotkey);
+    let hotkey = norm ?? prev.hotkey;
+    let hotkeyError: string | undefined;
+    if (!norm) {
+      hotkeyError = `"${s.hotkey}" is not a valid hotkey`;
+      hotkey = prev.hotkey;
+    } else {
+      const res = applyHotkey(norm);
+      if (!res.ok) {
+        // Revert to the previous hotkey (applyHotkey already re-registered it).
+        hotkeyError = res.error;
+        hotkey = prev.hotkey;
+      }
+    }
+    const persisted: AppSettings = { ...s, hotkey };
+    store.setSettings(persisted);
+    return {
+      ok: !hotkeyError,
+      settings: persisted,
+      hotkeyError,
+      hotkeyActive: activeHotkey !== null && globalShortcut.isRegistered(activeHotkey),
+    };
   });
+
+  ipcMain.handle(IPC.HOTKEY_STATUS, (): HotkeyStatus => ({
+    accelerator: store.getSettings().hotkey,
+    active: activeHotkey !== null && globalShortcut.isRegistered(activeHotkey),
+  }));
 
   ipcMain.handle(IPC.KEYS_SET, (_evt, provider: Provider, key: string) => {
     keyStore.set(provider, key);
@@ -563,7 +648,14 @@ app.whenReady().then(() => {
   overlay = createOverlay();
   void primeOverlayBuffer();
   const settings = store.getSettings();
-  registerHotkey(settings);
+  const hk = applyHotkey(settings.hotkey);
+  if (!hk.ok && settings.hotkey !== DEFAULT_SETTINGS.hotkey) {
+    // Heal a corrupt/unregisterable stored hotkey so the app is never hotkey-less.
+    console.warn(`PromptForge: stored hotkey "${settings.hotkey}" failed (${hk.error}); reverting to default`);
+    if (applyHotkey(DEFAULT_SETTINGS.hotkey).ok) {
+      store.setSettings({ ...settings, hotkey: DEFAULT_SETTINGS.hotkey });
+    }
+  }
   if (isDev) startDevBridge();
   if (!settings.onboardingDone) {
     onboarding = createOnboarding();

@@ -10,10 +10,25 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 
+function Test-IsPasswordElement($el) {
+  if ($null -eq $el) { return $false }
+  try { return [bool]$el.Current.IsPassword } catch {}
+  return $false
+}
+
+function Test-FocusedIsPassword {
+  try {
+    $el = [System.Windows.Automation.AutomationElement]::FocusedElement
+    return Test-IsPasswordElement $el
+  } catch {}
+  return $false
+}
+
 function Get-FocusedElementText {
   try {
     $el = [System.Windows.Automation.AutomationElement]::FocusedElement
     if ($null -eq $el) { return $null }
+    if (Test-IsPasswordElement $el) { return $null }
     $text = $null
     try {
       $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
@@ -36,6 +51,7 @@ function Get-UiaText([IntPtr]$focusHwnd) {
   if ($focusHwnd -eq [IntPtr]::Zero) { return $null }
   $el = [System.Windows.Automation.AutomationElement]::FromHandle($focusHwnd)
   if ($null -eq $el) { return $null }
+  if (Test-IsPasswordElement $el) { return $null }
   $text = $null
   try {
     $vp = $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
@@ -298,6 +314,13 @@ function Emit-MessageCapture([IntPtr]$focusHwnd, [string]$text) {
 
 $top = [IntPtr]::new($WindowHandle)
 $focus = Wait-CaptureReady $top
+
+# Password fields must never be captured — bail before ANY read, and especially before
+# the Ctrl+A/Ctrl+C keyboard-copy fallbacks below (those would exfiltrate the secret
+# to the clipboard).
+if (Test-FocusedIsPassword) {
+  exit 1
+}
 
 if (Test-ShouldSkipIntegratedTerminalCapture $script:ProcessName) {
   exit 1

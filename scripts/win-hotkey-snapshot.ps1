@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$MetaPath,
   [string]$TextPath = "",
-  [long]$TargetHwnd = 0
+  [long]$TargetHwnd = 0,
+  [string]$ContextPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -96,6 +97,69 @@ public static class WinFg {
   }
 }
 '@ -ErrorAction SilentlyContinue
+}
+
+# AGENTS: PfCtx is the context-layer P/Invoke class — do NOT fold these into the shared
+# WinFg class (owned by terminal-io.ps1). Guarded like every other Add-Type in this script.
+if (-not ([System.Management.Automation.PSTypeName]'PfCtx').Type) {
+Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class PfCtx {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+}
+'@ -ErrorAction SilentlyContinue
+}
+
+function Get-WindowTitle([long]$hwnd) {
+  try {
+    $sb = New-Object System.Text.StringBuilder 512
+    [void][PfCtx]::GetWindowText([IntPtr]::new($hwnd), $sb, $sb.Capacity)
+    return $sb.ToString()
+  } catch { return "" }
+}
+
+# Selection structure sidecar: selected text plus before/after-cursor context from the
+# TextPattern already fetched for capture. Caret-only fields work via the same clone
+# trick (empty selection range still marks the caret position). Whole body in one
+# try/catch — a failure here must never break capture.
+function Write-ContextSidecar($el, [string]$path) {
+  if ([string]::IsNullOrEmpty($path) -or $null -eq $el) { return }
+  try {
+    $tp = $el.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+    if ($null -eq $tp) { return }
+    $ranges = $tp.GetSelection()
+    if ($null -eq $ranges -or $ranges.Length -eq 0) { return }
+    $sel = $ranges[0]
+    $selectedText = $sel.GetText(4000)
+    if ($null -eq $selectedText) { $selectedText = "" }
+    $hasSelection = $selectedText.Length -gt 0
+
+    $docRange = $tp.DocumentRange
+    $before = $docRange.Clone()
+    $before.MoveEndpointByRange([System.Windows.Automation.Text.TextPatternRangeEndpoint]::End, $sel, [System.Windows.Automation.Text.TextPatternRangeEndpoint]::Start)
+    $beforeText = $before.GetText(-1)
+    if ($null -eq $beforeText) { $beforeText = "" }
+    $after = $docRange.Clone()
+    $after.MoveEndpointByRange([System.Windows.Automation.Text.TextPatternRangeEndpoint]::Start, $sel, [System.Windows.Automation.Text.TextPatternRangeEndpoint]::End)
+    $afterText = $after.GetText(-1)
+    if ($null -eq $afterText) { $afterText = "" }
+
+    if ($selectedText.Length -gt 4000) { $selectedText = $selectedText.Substring(0, 4000) }
+    if ($beforeText.Length -gt 1500) { $beforeText = $beforeText.Substring($beforeText.Length - 1500) }
+    if ($afterText.Length -gt 500) { $afterText = $afterText.Substring(0, 500) }
+
+    $obj = [ordered]@{
+      hasSelection = $hasSelection
+      selectedText = $selectedText
+      beforeCursor = $beforeText
+      afterCursor  = $afterText
+    }
+    $json = $obj | ConvertTo-Json -Compress
+    $enc = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($path, $json, $enc)
+  } catch {}
 }
 
 function Get-WindowInfo([long]$hwnd) {
@@ -382,6 +446,29 @@ try {
   $focusedIsTerminalPane = Resolve-FocusedIsTerminalPane $focusedEl $processName
 } catch {}
 
+# Password fields are NEVER read — no text, no UIA meta, no context sidecar. Not gated
+# by any setting. Emit a minimal summary so the main process can blank its pending state.
+$isPassword = $false
+try { $isPassword = [bool]$focusedEl.Current.IsPassword } catch {}
+if ($isPassword) {
+  $result = @{
+    hwnd                  = $hwnd
+    className             = $className
+    process               = $processName
+    hostKind              = "native"
+    isTerminal            = $false
+    focusedIsTerminalPane = $false
+    hasSelection          = $false
+    uia                   = "miss"
+    chars                 = 0
+    isPassword            = $true
+  }
+  Write-Output ($result | ConvertTo-Json -Compress)
+  exit 1
+}
+
+$windowTitle = Get-WindowTitle $hwnd
+
 if ($isIntegratedHost -and -not $focusedIsTerminalPane) {
   $skipPaneTree = $false
   try {
@@ -467,6 +554,7 @@ if ($isTerminal) {
           }
           if (-not [string]::IsNullOrEmpty($text)) {
             Write-ElementMeta $el "preCaptureFocus" $MetaPath $className $processName
+            Write-ContextSidecar $el $ContextPath
             if (Write-CaptureTextPath $text $TextPath) {
               $uiaStatus = "ok"
               $charCount = $text.Length
@@ -500,6 +588,25 @@ if ($isTerminal) {
   $hostKind = Get-HostKind $className "" ""
 }
 
+# Best-effort page URL for Chromium browsers (Document element exposes it via ValuePattern).
+# Single bounded attempt; window-title parsing is the fallback for site routing.
+$siteUrl = $null
+if ($ContextPath -and -not $isTerminal -and $className -match 'Chrome_WidgetWin') {
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($hwnd))
+    if ($null -ne $root) {
+      $docCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Document)
+      $doc = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $docCond)
+      if ($null -ne $doc) {
+        $vp = $doc.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        if ($vp -and $vp.Current.Value) { $siteUrl = $vp.Current.Value }
+      }
+    }
+  } catch {}
+}
+
 $result = @{
   hwnd                  = $hwnd
   className             = $className
@@ -510,9 +617,14 @@ $result = @{
   hasSelection          = $hasSelection
   uia                   = $uiaStatus
   chars                 = $charCount
+  windowTitle           = $windowTitle
+  isPassword            = $false
 }
 if ($null -ne $terminalBounds) {
   $result.terminalBounds = $terminalBounds
+}
+if (-not [string]::IsNullOrEmpty($siteUrl)) {
+  $result.siteUrl = $siteUrl
 }
 Write-Output ($result | ConvertTo-Json -Compress)
 if ($uiaStatus -eq "ok" -and $charCount -gt 0) { exit 0 }

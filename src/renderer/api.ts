@@ -2,10 +2,13 @@
 import type { PromptForgeAPI } from "../preload";
 import {
   DEFAULT_SETTINGS,
+  type AppSettings,
+  type CaptureContext,
   type CaptureMode,
   type InjectResult,
   type OverlayPlacement,
   type Provider,
+  type SettingsSetResult,
 } from "../shared/types";
 import { devBridgeOptimize, devBridgeSettingsGet } from "./devBridgeClient";
 
@@ -22,6 +25,8 @@ type OverlayShowPayload = {
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
+  /** Dev bridge / browser mock never seed destination context. */
+  context?: CaptureContext;
 };
 
 /**
@@ -69,7 +74,12 @@ function createBrowserMock(): PromptForgeAPI {
         return { ...DEFAULT_SETTINGS };
       }
     },
-    settingsSet: async () => undefined,
+    settingsSet: async (s: AppSettings): Promise<SettingsSetResult> => ({
+      ok: true,
+      settings: s,
+      hotkeyActive: false,
+    }),
+    hotkeyStatus: async () => ({ accelerator: DEFAULT_SETTINGS.hotkey, active: false }),
 
     keysSet: async () => undefined,
     keysHas: async (_provider: Provider) => false,

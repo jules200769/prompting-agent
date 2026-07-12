@@ -2,8 +2,9 @@
 // model's prompting guide supplies the prompt-engineering methodology.
 
 import OpenAI from "openai";
-import type { ModelId, OptLevel, PromptType } from "../shared/types";
+import type { CaptureContext, ModelId, OptLevel, PromptType } from "../shared/types";
 import { REWRITE_CONFIG } from "../shared/types";
+import { buildDestinationContextBlock } from "../shared/contextSignals";
 import { getPack } from "./packs";
 import { getGuideExcerpt, getLevelRewriteInstruction, getLevelStructureContract } from "./guideLoader";
 
@@ -18,6 +19,8 @@ export interface OptimizeParams {
   terminalContext?: boolean;
   /** Overlay type hint; "auto"/undefined adds nothing. */
   promptType?: PromptType;
+  /** Destination context from hotkey capture; renders the DESTINATION CONTEXT block. */
+  captureContext?: CaptureContext;
 }
 
 export interface StreamCallbacks {
@@ -127,6 +130,10 @@ TERMINAL SHELL (mandatory — overrides structure contract above):
     ? "STRUCTURE CONTRACT (mandatory):\n- Single line of plain prose only (see TERMINAL SHELL above)"
     : structureContract;
 
+  // Destination context (hotkey capture) sits after the model rule group and before
+  // persona/standing context so standing contextMemory stays a distinct signal.
+  const destinationContextBlock = buildDestinationContextBlock(params.captureContext);
+
   const system = `You are an expert prompt engineer specializing in ${pack.label}.
 
 Your job: refine the user's prompt following the official prompting guide below. The refined prompt is what the user will paste into ${pack.label}.
@@ -138,7 +145,7 @@ ${guide}
 ${levelLine}
 
 ${structureBlock}
-${terminalOutputRule}${promptTypeRule}${actionLanguageRule}${constraintFramingRule}${gptOutcomeFirstRule}${composerStructureRule}${grokStructureRule}${geminiStructureRule}
+${terminalOutputRule}${promptTypeRule}${actionLanguageRule}${constraintFramingRule}${gptOutcomeFirstRule}${composerStructureRule}${grokStructureRule}${geminiStructureRule}${destinationContextBlock}
 ${personaLine}${personaLine ? "\n" : ""}${contextLine}
 
 OUTPUT RULES (strict):

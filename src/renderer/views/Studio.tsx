@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, HistoryItem, LibraryItem, ModelId, OptLevel, WorkbenchSeed } from "../../shared/types";
+import type { AppSettings, HistoryItem, HotkeyStatus, LibraryItem, ModelId, OptLevel, WorkbenchSeed } from "../../shared/types";
 import { MODELS, REWRITE_CONFIG, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
-import { acceleratorFromEvent } from "../../shared/accelerator";
+import { acceleratorDisplayParts } from "../../shared/accelerator";
 import { api } from "../api";
 import { ScoreRing, RubricChips, ScoreLift } from "../components/Score";
 import { DiffView } from "../components/DiffView";
 import { ToastProvider, useToast } from "../components/Toast";
+import { HotkeyField } from "../components/HotkeyField";
 
 type Tab = "workbench" | "library" | "history" | "settings";
 
@@ -62,7 +63,7 @@ function StudioShell() {
           ))}
         </nav>
         <div className="mt-auto px-4 py-3 text-[10px] text-muted">
-          {settings ? `Hotkey: ${settings.hotkey}` : ""}
+          {settings ? `Hotkey: ${acceleratorDisplayParts(settings.hotkey).join("+")}` : ""}
         </div>
       </aside>
 
@@ -423,11 +424,12 @@ function Settings() {
   const [hasOpenAiKey, setHasOpenAiKey] = useState(false);
   const [isSecure, setIsSecure] = useState(true);
   const [keyInput, setKeyInput] = useState("");
-  const [recordingHotkey, setRecordingHotkey] = useState(false);
+  const [hotkeyStatus, setHotkeyStatus] = useState<HotkeyStatus | null>(null);
   const toast = useToast();
 
   useEffect(() => {
     void api.settingsGet().then(setS).catch((e) => { console.error("settingsGet failed", e); });
+    void api.hotkeyStatus().then(setHotkeyStatus).catch((e) => console.error("hotkeyStatus failed", e));
     void api.keysHas("openai").then(setHasOpenAiKey).catch((e) => console.error("keysHas failed", e));
     void api.keysIsSecure().then(setIsSecure).catch((e) => console.error("keysIsSecure failed", e));
   }, []);
@@ -438,8 +440,20 @@ function Settings() {
 
   async function save() {
     if (!s) return;
-    await api.settingsSet(s);
-    toast({ text: "Settings saved." });
+    try {
+      const res = await api.settingsSet(s);
+      // Resync — the hotkey may have been normalized or reverted by the main process.
+      setS(res.settings);
+      setHotkeyStatus({ accelerator: res.settings.hotkey, active: res.hotkeyActive });
+      if (res.ok) {
+        toast({ text: "Settings saved." });
+      } else {
+        toast({ text: `Settings saved, but the hotkey was not changed: ${res.hotkeyError ?? "registration failed"}` });
+      }
+    } catch (e) {
+      console.error("settingsSet failed", e);
+      toast({ text: "Failed to save settings." });
+    }
   }
 
   async function saveKey() {
@@ -466,39 +480,12 @@ function Settings() {
           )}
           <div className="space-y-4">
             <Field label="Global hotkey">
-              <div className="flex items-center gap-2">
-                <input
-                  value={recordingHotkey ? "Press a key combo… (Esc cancels)" : s.hotkey}
-                  readOnly={recordingHotkey}
-                  onChange={(e) => update({ hotkey: e.target.value })}
-                  onKeyDown={(e) => {
-                    if (!recordingHotkey) return;
-                    e.preventDefault();
-                    if (e.key === "Escape") {
-                      setRecordingHotkey(false);
-                      return;
-                    }
-                    const acc = acceleratorFromEvent(e);
-                    if (acc) {
-                      update({ hotkey: acc });
-                      setRecordingHotkey(false);
-                    }
-                  }}
-                  onBlur={() => setRecordingHotkey(false)}
-                  className={`flex-1 bg-bg-800 border rounded-md text-sm px-2 py-1.5 ${recordingHotkey ? "border-accent text-muted" : "border-line"}`}
-                />
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    setRecordingHotkey(true);
-                    (e.currentTarget.previousElementSibling as HTMLInputElement | null)?.focus();
-                  }}
-                  className="text-xs px-3 py-1.5 rounded-md border border-line hover:border-accent"
-                >
-                  Record
-                </button>
-              </div>
-              <p className="text-[10px] text-muted mt-1">Modifiers: CommandOrControl, Shift, Alt, Super. e.g. CommandOrControl+Shift+O</p>
+              <HotkeyField
+                value={s.hotkey}
+                onChange={(hotkey) => update({ hotkey })}
+                status={hotkeyStatus?.accelerator === s.hotkey ? hotkeyStatus : null}
+              />
+              <p className="text-[10px] text-muted mt-1">Combine Ctrl, Alt, Shift, or Win with a letter, digit, or F1–F24. Save to apply.</p>
             </Field>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Default target model">
@@ -521,6 +508,10 @@ function Settings() {
             <Field label="Context memory (audience, job, tone — applied to every optimization)">
               <textarea value={s.contextMemory} onChange={(e) => update({ contextMemory: e.target.value })} className="w-full bg-bg-800 border border-line rounded-md text-sm px-2 py-1.5 h-20 resize-none" />
             </Field>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={s.screenContext} onChange={(e) => update({ screenContext: e.target.checked })} />
+              Screen context — let the hotkey read the active app's title, site, and surrounding text to tailor rewrites (off = prompt text only)
+            </label>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={s.telemetry} onChange={(e) => update({ telemetry: e.target.checked })} />
               Allow anonymous telemetry

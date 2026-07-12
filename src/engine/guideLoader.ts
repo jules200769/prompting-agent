@@ -6,7 +6,7 @@ import type { ModelId, OptLevel } from "../shared/types";
 import { LEVEL_LABELS } from "../shared/types";
 
 /** Bump when meta-prompt / structure contract changes — invalidates persisted opt cache. */
-export const REWRITE_PIPELINE_VERSION = 7;
+export const REWRITE_PIPELINE_VERSION = 8;
 
 const GUIDE_FILES: Record<ModelId, string> = {
   "claude-opus-4.8": "opus4.8.md",

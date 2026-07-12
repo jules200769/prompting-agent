@@ -37,12 +37,20 @@ interface CachedOptimizeEntry {
   packVersion: string;
 }
 
+/** File name seen in a code-editor window title (context-layer file memory). */
+interface FileMemoryEntry {
+  name: string;
+  lastSeen: number;
+  hits: number;
+}
+
 interface StoreShape {
   settings: AppSettings | null;
   library: LibraryItem[];
   history: HistoryItem[];
   optCache: Record<string, CachedOptimizeEntry>;
   optCacheOrder: string[];
+  fileMemory: FileMemoryEntry[];
   /** @deprecated Migrated to settings.overlayPlacement; cleared on first launch after upgrade. */
   overlayPosition?: { x: number; y: number } | null;
 }
@@ -53,6 +61,7 @@ const EMPTY: StoreShape = {
   history: [],
   optCache: {},
   optCacheOrder: [],
+  fileMemory: [],
 };
 
 let data: StoreShape | null = null;
@@ -222,20 +231,47 @@ export function clearHistory(): void {
   persist();
 }
 
+// ---------- File memory (context layer) ----------
+const FILE_MEMORY_MAX = 200;
+
+/** Record editor file names (case-insensitive dedupe, LRU by lastSeen, cap 200). */
+export function recordFileMemory(names: string[]): void {
+  if (names.length === 0) return;
+  const d = load();
+  const now = Date.now();
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    const existing = d.fileMemory.find((e) => e.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      existing.lastSeen = now;
+      existing.hits += 1;
+      existing.name = trimmed;
+    } else {
+      d.fileMemory.push({ name: trimmed, lastSeen: now, hits: 1 });
+    }
+  }
+  if (d.fileMemory.length > FILE_MEMORY_MAX) {
+    d.fileMemory.sort((a, b) => b.lastSeen - a.lastSeen);
+    d.fileMemory = d.fileMemory.slice(0, FILE_MEMORY_MAX);
+  }
+  persist();
+}
+
+/** Most recently seen file names, newest first. */
+export function listFileMemory(limit = 50): string[] {
+  return [...load().fileMemory]
+    .sort((a, b) => b.lastSeen - a.lastSeen)
+    .slice(0, limit)
+    .map((e) => e.name);
+}
+
 // ---------- Opt cache ----------
 import { REWRITE_PIPELINE_VERSION } from "../engine/guideLoader";
+import { buildCacheKey, type CacheKeyRequest } from "../shared/cacheKey";
 
-export function cacheHash(req: {
-  prompt: string;
-  model: string;
-  level: number;
-  persona?: string;
-  terminalContext?: boolean;
-  promptType?: string;
-}): string {
-  const term = req.terminalContext ? "|terminal" : "";
-  const type = req.promptType && req.promptType !== "auto" ? `|type:${req.promptType}` : "";
-  return `v${REWRITE_PIPELINE_VERSION}|${req.model}|${req.level}|${req.persona ?? ""}${term}${type}|${req.prompt.trim().toLowerCase()}`;
+export function cacheHash(req: CacheKeyRequest): string {
+  return buildCacheKey(REWRITE_PIPELINE_VERSION, req);
 }
 
 export function hydrateCacheResult(cached: CachedOptimizeEntry, originalPrompt: string): OptimizeResult {

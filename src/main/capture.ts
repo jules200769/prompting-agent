@@ -8,7 +8,7 @@ import { writeFile, unlink, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { clipboard, app } from "electron";
-import type { CaptureMode } from "../shared/types";
+import type { CaptureContext, CaptureMode } from "../shared/types";
 import { resolveCaptureResult, pickResolvedCaptureText } from "../shared/captureResolve";
 import { shouldUseEarlyCaptureFastPath } from "../shared/captureFastPath";
 import { isTerminalCaptureContext, isCaptureNoiseText } from "../shared/terminalDetect";
@@ -27,6 +27,13 @@ import {
   type HostKind,
 } from "../shared/injectStrategy";
 import { toTerminalSingleLine } from "../shared/terminalOutput";
+import {
+  assembleCaptureContext,
+  harvestFileMemory,
+  type ContextSidecarSignals,
+  type SnapshotContextSignals,
+} from "./contextLayer";
+import { getSettings } from "./storage";
 
 type SkipHwndProvider = () => number[];
 
@@ -71,6 +78,12 @@ let pendingCaptureText: string | null = null;
 let pendingIsTerminal = false;
 /** Snapshot context from the last hotkey (for terminal fallback on field-path reads). */
 let lastSnapshotContext: TerminalSnapshotContext = {};
+/** Selection-structure sidecar from the last hotkey snapshot (context layer). */
+let pendingContextSignals: ContextSidecarSignals | null = null;
+/** App-identity signals from the last hotkey snapshot summary (context layer). */
+let pendingSnapshotSignals: SnapshotContextSignals = {};
+/** Focused element at hotkey time was a password field — nothing may be captured. */
+let pendingIsPassword = false;
 
 async function readForegroundHwnd(): Promise<number> {
   return getForegroundHwnd();
@@ -194,6 +207,8 @@ export interface CaptureResult {
   uia: UiaTargetMeta | null;
   /** True when capture came from (or failed in) a terminal context — overlay shows terminal hint. */
   terminalContext?: boolean;
+  /** Destination context for the rewrite (screenContext on, never for password fields). */
+  context?: CaptureContext;
 }
 
 async function readCaptureMeta(metaPath: string): Promise<UiaTargetMeta | null> {
@@ -298,6 +313,9 @@ interface HotkeySnapshotJson {
   focusedIsTerminalPane?: boolean;
   hasSelection?: boolean;
   terminalBounds?: TerminalBounds;
+  windowTitle?: string;
+  isPassword?: boolean;
+  siteUrl?: string;
 }
 
 function sanitizeCaptureText(text: string | null | undefined): string | null {
@@ -327,8 +345,13 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
 
   const metaPath = join(tmpdir(), `promptforge-uia-snapshot-${Date.now()}.json`);
   const textPath = join(tmpdir(), `promptforge-uia-text-${Date.now()}.txt`);
+  const screenContextOn = getSettings().screenContext;
+  const contextPath = screenContextOn ? join(tmpdir(), `promptforge-ctx-${Date.now()}.json`) : null;
   pendingIsTerminal = false;
   lastSnapshotContext = {};
+  pendingContextSignals = null;
+  pendingSnapshotSignals = {};
+  pendingIsPassword = false;
   try {
     const psArgs = [
       "-File",
@@ -338,6 +361,9 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
       "-TextPath",
       textPath,
     ];
+    if (contextPath) {
+      psArgs.push("-ContextPath", contextPath);
+    }
     if (preparedHwnd > 0) {
       psArgs.push("-TargetHwnd", String(preparedHwnd));
     }
@@ -367,6 +393,34 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
       focusedIsTerminalPane: summary?.focusedIsTerminalPane,
       terminalBounds: summary?.terminalBounds,
     };
+
+    pendingSnapshotSignals = {
+      windowTitle: summary?.windowTitle,
+      siteUrl: summary?.siteUrl,
+      process: summary?.process,
+      className: summary?.className,
+      hostKind: summary?.hostKind,
+      isPassword: summary?.isPassword,
+    };
+
+    if (summary?.isPassword) {
+      // Focused element is a password field — nothing was (or may be) captured.
+      pendingIsPassword = true;
+      pendingUiaMeta = null;
+      pendingCaptureText = null;
+      pendingIsTerminal = false;
+      console.log("[PromptForge] hotkey snapshot: password field — capture skipped");
+      return null;
+    }
+
+    if (contextPath && screenContextOn) {
+      try {
+        const rawCtx = (await readFile(contextPath, "utf8")).replace(/^\uFEFF/, "").trim();
+        if (rawCtx) pendingContextSignals = JSON.parse(rawCtx) as ContextSidecarSignals;
+      } catch {
+        pendingContextSignals = null;
+      }
+    }
 
     pendingIsTerminal =
       Boolean(summary?.isTerminal) ||
@@ -421,10 +475,14 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
     pendingUiaMeta = null;
     pendingCaptureText = null;
     pendingIsTerminal = false;
+    pendingContextSignals = null;
+    pendingSnapshotSignals = {};
+    pendingIsPassword = false;
     return null;
   } finally {
     await unlink(metaPath).catch(() => {});
     await unlink(textPath).catch(() => {});
+    if (contextPath) await unlink(contextPath).catch(() => {});
   }
 }
 
@@ -482,8 +540,37 @@ async function captureViaScript(hwnd: number, metaPath: string): Promise<string>
   return stdout;
 }
 
+/** Attach destination context to a capture result + defer file-memory harvest off the hotkey path. */
+function withCaptureContext(result: CaptureResult): CaptureResult {
+  const sidecar = pendingContextSignals;
+  const signals = pendingSnapshotSignals;
+  pendingContextSignals = null;
+  const context = assembleCaptureContext({
+    mode: result.mode,
+    capturedText: result.text,
+    uia: result.uia,
+    sidecar,
+    snapshot: signals,
+  });
+  setImmediate(() => harvestFileMemory(signals.windowTitle, signals.process));
+  return { ...result, context };
+}
+
 export async function captureSelection(): Promise<CaptureResult> {
   const snapshot = snapshotClipboard();
+
+  if (pendingIsPassword) {
+    // Password field at hotkey time: nothing was read, nothing runs (win-capture's
+    // own guard is defense in depth), no context, no file-memory harvest.
+    pendingIsPassword = false;
+    pendingContextSignals = null;
+    pendingIsTerminal = false;
+    pendingUiaMeta = null;
+    pendingCaptureText = null;
+    console.warn("[PromptForge] capture: password field — nothing captured");
+    restoreClipboardSnapshot(snapshot);
+    return { text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null };
+  }
 
   if (lastForegroundHwnd == null) {
     await refreshCaptureTargetFromForeground();
@@ -506,23 +593,23 @@ export async function captureSelection(): Promise<CaptureResult> {
     if (resolved.mode === "terminal" && resolved.text) {
       console.log("[PromptForge] capture: terminal", resolved.text.length, "chars");
       freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
-      return {
+      return withCaptureContext({
         text: resolved.text,
         mode: "terminal",
         snapshot,
         uia: null,
         terminalContext: true,
-      };
+      });
     }
     console.warn("[PromptForge] capture: terminal with no usable input — select text or type at the prompt");
     restoreClipboardSnapshot(snapshot);
-    return {
+    return withCaptureContext({
       text: "",
       mode: "empty",
       snapshot: { text: "", hasText: false },
       uia: null,
       terminalContext: true,
-    };
+    });
   }
 
   const earlyTextPeek = pendingCaptureText;
@@ -534,13 +621,13 @@ export async function captureSelection(): Promise<CaptureResult> {
     if (resolved.mode === "terminal" && resolved.text) {
       console.log("[PromptForge] capture: terminal fast-path", resolved.text.length, "chars");
       freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
-      return {
+      return withCaptureContext({
         text: resolved.text,
         mode: "terminal",
         snapshot,
         uia: null,
         terminalContext: true,
-      };
+      });
     }
     if (resolved.mode === "field" && resolved.text.trim()) {
       const text = resolved.text;
@@ -555,7 +642,7 @@ export async function captureSelection(): Promise<CaptureResult> {
         topClassName: lastSnapshotContext.className,
         processName: lastSnapshotContext.process,
       });
-      return { text, mode: "field", snapshot, uia: earlyUiaPeek };
+      return withCaptureContext({ text, mode: "field", snapshot, uia: earlyUiaPeek });
     }
     pendingCaptureText = earlyTextPeek;
     pendingUiaMeta = earlyUiaPeek;
@@ -590,13 +677,13 @@ export async function captureSelection(): Promise<CaptureResult> {
   if (resolved.mode === "terminal" && resolved.text) {
     console.log("[PromptForge] capture: terminal (slow-path)", resolved.text.length, "chars");
     freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
-    return {
+    return withCaptureContext({
       text: resolved.text,
       mode: "terminal",
       snapshot,
       uia: null,
       terminalContext: true,
-    };
+    });
   }
 
   const text = pickResolvedCaptureText(resolved, picked);
@@ -612,7 +699,7 @@ export async function captureSelection(): Promise<CaptureResult> {
       topClassName: lastSnapshotContext.className,
       processName: lastSnapshotContext.process,
     });
-    return { text: text.trim(), mode: "field", snapshot, uia: uiaMeta };
+    return withCaptureContext({ text: text.trim(), mode: "field", snapshot, uia: uiaMeta });
   }
 
   console.warn("[PromptForge] capture: hwnd ok but no text read");
@@ -626,35 +713,35 @@ export async function captureSelection(): Promise<CaptureResult> {
   const resolvedText = finalizeCaptureText(pickCaptureText(fallbackResult.text, earlyText).trim());
   if (resolvedText.mode === "terminal" && resolvedText.text) {
     freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
-    return {
+    return withCaptureContext({
       text: resolvedText.text,
       mode: "terminal",
       snapshot,
       uia: null,
       terminalContext: true,
-    };
+    });
   }
   if (resolvedText.mode === "field" && resolvedText.text.trim()) {
     freezeInjectTarget(hwnd, uiaMeta, {
       topClassName: lastSnapshotContext.className,
       processName: lastSnapshotContext.process,
     });
-    return { text: resolvedText.text.trim(), mode: "field", snapshot, uia: uiaMeta };
+    return withCaptureContext({ text: resolvedText.text.trim(), mode: "field", snapshot, uia: uiaMeta });
   }
 
   if (inTerminalContext) {
     restoreClipboardSnapshot(snapshot);
-    return {
+    return withCaptureContext({
       text: "",
       mode: "empty",
       snapshot: { text: "", hasText: false },
       uia: null,
       terminalContext: true,
-    };
+    });
   }
 
   restoreClipboardSnapshot(snapshot);
-  return { text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null };
+  return withCaptureContext({ text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null });
 }
 
 export async function injectText(text: string, snapshot: { text: string; hasText: boolean }): Promise<"injected" | "copied"> {

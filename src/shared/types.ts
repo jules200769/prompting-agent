@@ -55,6 +55,48 @@ export const LEVEL_COLORS: Record<OptLevel, string> = {
 
 export type CaptureMode = "field" | "empty" | "terminal";
 
+// ---------- Capture context (destination-aware rewrites) ----------
+
+/** Where the captured text sits relative to the field: full field, a selection, or nothing. */
+export type ContextTextScope = "selection" | "field" | "empty";
+
+/** Hard caps applied to every context field before it can reach the meta-prompt. */
+export const CONTEXT_CAPS = {
+  selectedText: 4000,
+  beforeCursor: 1500,
+  afterCursor: 500,
+  windowTitle: 200,
+  files: 10,
+} as const;
+
+/**
+ * Structured destination signal captured at hotkey time (screenContext setting on).
+ * Assembled main-side, echoed back on every OptimizeRequest for the overlay session.
+ */
+export interface CaptureContext {
+  app?: {
+    processName?: string;
+    windowTitle?: string;
+    hostKind?: "native" | "chromium" | "richEditor" | "terminal";
+    /** Normalized site host for browser targets (e.g. "claude.ai"). */
+    site?: string;
+    editorKind?: "cursor" | "vscode" | "windsurf";
+  };
+  text?: {
+    scope: ContextTextScope;
+    hasSelection: boolean;
+    selectedText?: string;
+    beforeCursor?: string;
+    afterCursor?: string;
+  };
+  files?: {
+    activeFile?: string;
+    recentFiles?: string[];
+  };
+  /** UI preselect only — never rendered into the meta-prompt block. */
+  suggestedModel?: ModelId;
+}
+
 /** Overlay top-tab prompt type: shapes the rewrite deliverable; "auto" adds no hint. */
 export type PromptType = "auto" | "question" | "prompt" | "letter";
 
@@ -114,6 +156,8 @@ export interface OptimizeRequest {
   promptType?: PromptType;
   /** Terminal capture: refined output must be a single line (no newlines) for shell paste. */
   terminalContext?: boolean;
+  /** Destination context captured at hotkey time (screenContext on); shapes the rewrite fit. */
+  captureContext?: CaptureContext;
 }
 
 export interface LibraryItem {
@@ -174,10 +218,12 @@ export interface AppSettings {
   theme: "dark" | "light";
   overlayPlacement: OverlayPlacement;
   onboardingDone: boolean;
+  /** Hotkey may read active-app title/site/surrounding text to tailor rewrites; off = prompt text only. */
+  screenContext: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  hotkey: "CommandOrControl+Shift+O",
+  hotkey: "CommandOrControl+Space",
   defaultModel: "claude-opus-4.8",
   defaultLevel: 2,
   defaultPersona: "",
@@ -188,7 +234,22 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",
   overlayPlacement: "center",
   onboardingDone: false,
+  screenContext: true,
 };
+
+/** Result of persisting settings; `ok` is false only when the hotkey was rejected and reverted. */
+export interface SettingsSetResult {
+  ok: boolean;
+  /** What was actually persisted — the hotkey may have been normalized or reverted. */
+  settings: AppSettings;
+  hotkeyError?: string;
+  hotkeyActive: boolean;
+}
+
+export interface HotkeyStatus {
+  accelerator: string;
+  active: boolean;
+}
 
 export const RUBRIC_WEIGHTS: SubScores = {
   clarity: 25,
@@ -219,6 +280,7 @@ export const IPC = {
   CAPTURE_COPY: "promptforge:capture:copy",
   SETTINGS_GET: "promptforge:settings:get",
   SETTINGS_SET: "promptforge:settings:set",
+  HOTKEY_STATUS: "promptforge:hotkey:status",
   KEYS_SET: "promptforge:keys:set",
   KEYS_HAS: "promptforge:keys:has",
   KEYS_DELETE: "promptforge:keys:delete",

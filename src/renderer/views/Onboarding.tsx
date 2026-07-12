@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
-import { MODELS, type AppSettings } from "../../shared/types";
+import { DEFAULT_SETTINGS, MODELS, type AppSettings } from "../../shared/types";
+import { Keycaps } from "../components/Keycaps";
 
 type Step = "key" | "hotkey" | "thesis" | "try";
 
@@ -9,24 +10,6 @@ const SAMPLE_PROMPT =
   "write a function that fetches users from an api and shows them in a list";
 
 const KEY_URL = "https://platform.openai.com/api-keys";
-
-function Keycaps({ accelerator }: { accelerator: string }) {
-  const parts = accelerator
-    .split("+")
-    .map((p) => (p === "CommandOrControl" || p === "CmdOrCtrl" ? "Ctrl" : p));
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {parts.map((p, i) => (
-        <kbd
-          key={i}
-          className="px-2.5 py-1 rounded-lg border border-white/30 bg-white/10 text-[15px] font-semibold text-white shadow-[inset_0_-2px_0_rgba(0,0,0,0.35)]"
-        >
-          {p}
-        </kbd>
-      ))}
-    </span>
-  );
-}
 
 function Pill({
   children,
@@ -132,7 +115,7 @@ export function Onboarding() {
 
   const busyReveal = tryBusy || isRevealing;
   const modelLabels = useMemo(() => MODELS.map((m) => m.label), []);
-  const hotkey = settings?.hotkey ?? "CommandOrControl+Shift+O";
+  const hotkey = settings?.hotkey ?? DEFAULT_SETTINGS.hotkey;
   const demoRef = useRef<HTMLTextAreaElement>(null);
 
   return (

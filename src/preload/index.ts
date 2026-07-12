@@ -1,12 +1,13 @@
 // Preload: exposes a tight allowlist IPC API to the renderer. No Node globals leak.
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type OptimizeRequest, type AppSettings, type CaptureMode, type InjectResult, type OverlayPlacement, type Provider, type WorkbenchSeed } from "../shared/types";
+import { IPC, type OptimizeRequest, type AppSettings, type CaptureContext, type CaptureMode, type HotkeyStatus, type InjectResult, type OverlayPlacement, type Provider, type SettingsSetResult, type WorkbenchSeed } from "../shared/types";
 
 type OverlayShowPayload = {
   text: string;
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
+  context?: CaptureContext;
 };
 
 const overlayShowCallbacks = new Set<(payload: OverlayShowPayload) => void>();
@@ -67,7 +68,8 @@ const api = {
   captureCopy: (text: string) => ipcRenderer.invoke(IPC.CAPTURE_COPY, text),
 
   settingsGet: () => ipcRenderer.invoke(IPC.SETTINGS_GET) as Promise<AppSettings>,
-  settingsSet: (s: AppSettings) => ipcRenderer.invoke(IPC.SETTINGS_SET, s),
+  settingsSet: (s: AppSettings) => ipcRenderer.invoke(IPC.SETTINGS_SET, s) as Promise<SettingsSetResult>,
+  hotkeyStatus: () => ipcRenderer.invoke(IPC.HOTKEY_STATUS) as Promise<HotkeyStatus>,
 
   keysSet: (provider: Provider, key: string) => ipcRenderer.invoke(IPC.KEYS_SET, provider, key),
   keysHas: (provider: Provider) => ipcRenderer.invoke(IPC.KEYS_HAS, provider) as Promise<boolean>,

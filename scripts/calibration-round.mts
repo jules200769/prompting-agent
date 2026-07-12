@@ -2,6 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import type { IncomingMessage } from "node:http";
 import type { ModelId, OptLevel } from "../src/shared/types";
 import { optimizeStream } from "../src/engine/providers";
 
@@ -63,9 +64,9 @@ async function runViaBridge(prompt: string, level: OptLevel): Promise<string> {
         method: "POST",
         headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
       },
-      (res) => {
+      (res: IncomingMessage) => {
         let buf = "";
-        res.on("data", (c) => buf += c);
+        res.on("data", (chunk: Buffer) => (buf += chunk));
         res.on("end", () => {
           try {
             const lines = buf.trim().split("\n");
