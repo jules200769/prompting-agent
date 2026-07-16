@@ -485,8 +485,6 @@ if ($isIntegratedHost -and -not $focusedIsTerminalPane) {
 }
 
 $isTerminal = $isNativeTerminal -or ($isIntegratedHost -and $focusedIsTerminalPane)
-$useConhostCopy = $className -eq "ConsoleWindowClass"
-$useIntegratedCopy = $isIntegratedHost -and -not $isNativeTerminal
 
 if ($isTerminal) {
   for ($i = 0; $i -lt 3; $i++) {
@@ -508,15 +506,11 @@ if ($isTerminal) {
           $termBounds = Get-TerminalPaneBoundsFromElement $paneEl
         }
       }
+      # UIA-only — never SendCtrlCombo/Ctrl+C here. Clipboard copy fallbacks inject ^C into
+      # the focused terminal (breaks npm run dev / shells) and were rejected for selection UX.
       $text = $null
       if ($null -ne $el) {
         $text = Get-ElementSelectionText $el
-      }
-      if ([string]::IsNullOrEmpty($text)) {
-        $text = Invoke-TerminalPromptLineCopy $hwnd $el $useConhostCopy $useIntegratedCopy $termBounds
-      }
-      if ([string]::IsNullOrEmpty($text)) {
-        $text = Invoke-TerminalSelectionCopy $hwnd $el $useConhostCopy $useIntegratedCopy $termBounds
       }
       if ([string]::IsNullOrEmpty($text) -and $null -ne $el) {
         $text = Get-ElementDocumentText $el

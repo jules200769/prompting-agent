@@ -12,6 +12,7 @@ import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
 import type { CaptureContext, CaptureMode, ModelId, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
 import { MODELS, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
 import { toTerminalSingleLine, stripTerminalStreamChunk } from "../../shared/terminalOutput";
+import { CONTEXT_IMPORT_PROMPT } from "../../shared/contextImportPrompt";
 import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
 import { ModelPicker } from "../components/ModelPicker";
 import { WritingTypePicker, type WritingType, writingLevelLabels } from "../components/WritingTypePicker";
@@ -231,6 +232,9 @@ export function Overlay() {
   const [shellVisible, setShellVisible] = useState(false);
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [terminalContext, setTerminalContext] = useState(false);
+  const [contextModalOpen, setContextModalOpen] = useState(false);
+  const [importedContext, setImportedContext] = useState("");
+  const [importPromptCopied, setImportPromptCopied] = useState(false);
   const captureRef = useRef<{
     text: string;
     mode: CaptureMode;
@@ -414,6 +418,12 @@ export function Overlay() {
     await api.captureCopy(text);
   }
 
+  async function onCopyImportPrompt() {
+    await api.captureCopy(CONTEXT_IMPORT_PROMPT);
+    setImportPromptCopied(true);
+    window.setTimeout(() => setImportPromptCopied(false), 2000);
+  }
+
   async function onPlacementChange(placement: OverlayPlacement) {
     setOverlayPlacement(placement);
     await api.setOverlayPlacement(placement);
@@ -518,12 +528,38 @@ export function Overlay() {
             <MoreIcon />
           </button>
           {menuOpen && (
-            <div className="apple-glass-menu absolute right-0 top-full mt-1 min-w-[180px] rounded-xl py-2 text-white">
+            <div className="absolute right-0 top-full mt-1 flex items-start gap-2">
+              <div className="flex flex-col gap-2 shrink-0">
+                <button
+                  type="button"
+                  className="apple-glass-menu w-full rounded-xl py-2 px-3 text-sm text-center text-white hover:bg-white/10"
+                >
+                  + New session
+                </button>
+                <button
+                  type="button"
+                  className="apple-glass-menu w-full rounded-xl py-2 px-3 text-sm text-center text-white hover:bg-white/10"
+                >
+                  Clear session
+                </button>
+              </div>
+              <div className="apple-glass-menu min-w-[180px] rounded-xl py-2 text-white">
               <div className="px-3 pb-2">
                 <div className="text-[10px] uppercase tracking-wider text-white/50 mb-2">Position</div>
                 <OverlayPlacementPicker value={overlayPlacement} onChange={onPlacementChange} />
               </div>
               <div className="border-t border-white/10 my-1" />
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setImportPromptCopied(false);
+                  setContextModalOpen(true);
+                }}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
+              >
+                Configure context
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -556,19 +592,13 @@ export function Overlay() {
               >
                 Dismiss
               </button>
+              </div>
             </div>
           )}
         </div>
 
         <div className="apple-glass relative z-10 rounded-[34px] w-full p-4 text-white">
           <>
-            {captureFailed && (
-              <div className="mb-3 px-1 text-[13px] text-warn" role="status">
-                {terminalContext
-                  ? "Select terminal text or type at the prompt, then press the hotkey."
-                  : "Nothing captured — type a prompt below, or click into a text field and press the hotkey again."}
-              </div>
-            )}
             <div className="flex gap-4 mb-4 items-start">
               <div className="flex-1 flex flex-col gap-3">
                 <div className="apple-glass-panel rounded-[26px] h-[88px] overflow-hidden">
@@ -672,6 +702,97 @@ export function Overlay() {
           </>
         </div>
       </div>
+
+      {contextModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-6"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) setContextModalOpen(false);
+          }}
+        >
+          <div className="apple-glass-menu relative w-full max-w-[480px] rounded-[24px] p-5 text-white">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-[16px] font-medium">Import context to ANVYL.ai</h2>
+              <button
+                type="button"
+                onClick={() => setContextModalOpen(false)}
+                className="text-white/50 hover:text-white transition"
+                aria-label="Close"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="relative">
+              <div
+                className="pointer-events-none absolute left-[1px] top-[26px] bottom-[132px] w-px bg-white/35"
+                aria-hidden
+              />
+
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2 -ml-1.5">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-black text-[11px] shrink-0">
+                    1
+                  </span>
+                  <span className="text-[13px] text-white/80">
+                    Copy this prompt into a chat with your other AI provider
+                  </span>
+                </div>
+                <div className="relative mx-3 rounded-xl bg-black/25 border border-white/10">
+                  <div className="h-[88px] overflow-y-auto scroll-thin px-3.5 py-3 pr-[72px] text-[13px] leading-relaxed text-white/70 whitespace-pre-wrap select-text">
+                    {CONTEXT_IMPORT_PROMPT}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void onCopyImportPrompt()}
+                    className="absolute top-2 right-2 flex items-center gap-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition px-2.5 py-1.5 text-[12px] text-white"
+                  >
+                    {importPromptCopied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-5">
+                <div className="flex items-center gap-2 mb-2 -ml-1.5">
+                  <span className="flex items-center justify-center w-4 h-4 rounded-full bg-black text-[11px] shrink-0">
+                    2
+                  </span>
+                  <span className="text-[13px] text-white/80">
+                    Paste results below to add to the Session's context
+                  </span>
+                </div>
+                <div className="mx-3">
+                  <textarea
+                    value={importedContext}
+                    onChange={(e) => setImportedContext(e.target.value)}
+                    placeholder="Paste your context details here"
+                    className="w-full h-[88px] rounded-xl bg-black/25 border border-white/10 px-3.5 py-3 text-[13px] leading-relaxed text-white placeholder:text-white/40 resize-none focus:outline-none scroll-thin"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setContextModalOpen(false)}
+                className="rounded-xl px-3.5 py-2 text-[13px] text-white/70 hover:bg-white/10 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => setContextModalOpen(false)}
+                className="rounded-xl px-3.5 py-2 text-[13px] bg-white/15 hover:bg-white/25 transition"
+              >
+                Add to context
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

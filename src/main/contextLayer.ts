@@ -85,14 +85,20 @@ export function assembleCaptureContext(opts: {
   }
 
   const sidecar = opts.sidecar;
-  const hasSelection = Boolean(sidecar?.hasSelection);
-  ctx.text = {
-    scope: opts.mode === "empty" ? "empty" : hasSelection ? "selection" : "field",
-    hasSelection,
-    selectedText: capHead(sidecar?.selectedText || undefined, CONTEXT_CAPS.selectedText),
-    beforeCursor: capTail(sidecar?.beforeCursor || undefined, CONTEXT_CAPS.beforeCursor),
-    afterCursor: capHead(sidecar?.afterCursor || undefined, CONTEXT_CAPS.afterCursor),
-  };
+  // Compose/empty sessions must not carry "selected passage" rewrite instructions —
+  // hotkey with a highlight opens empty draft on purpose (see capture.ts).
+  if (opts.mode === "empty") {
+    ctx.text = { scope: "empty", hasSelection: false };
+  } else {
+    const hasSelection = Boolean(sidecar?.hasSelection);
+    ctx.text = {
+      scope: hasSelection ? "selection" : "field",
+      hasSelection,
+      selectedText: capHead(sidecar?.selectedText || undefined, CONTEXT_CAPS.selectedText),
+      beforeCursor: capTail(sidecar?.beforeCursor || undefined, CONTEXT_CAPS.beforeCursor),
+      afterCursor: capHead(sidecar?.afterCursor || undefined, CONTEXT_CAPS.afterCursor),
+    };
+  }
 
   if (editorKind) {
     const activeFile = extractFileFromEditorTitle(windowTitle, processName) ?? undefined;

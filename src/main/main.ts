@@ -314,9 +314,9 @@ async function waitForWindowsHidden(maxMs = 80, intervalMs = 10): Promise<void> 
 }
 
 async function hideForCapture(): Promise<void> {
-  if (overlay?.isVisible()) {
-    overlay.setOpacity(0);
-  }
+  // Do not opacity-hide the resident shell. showOverlayShell() already revealed it;
+  // dimming here and restoring opacity in deliverCaptureToOverlay looks like a second
+  // popup — especially on empty/compose captures that miss the early fast path.
   for (const w of BrowserWindow.getAllWindows()) {
     if (w === overlay) continue;
     if (w.isVisible()) w.hide();

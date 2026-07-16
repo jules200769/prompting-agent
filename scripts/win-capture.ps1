@@ -348,12 +348,8 @@ $result = Wait-ForFocusedElementText
 if ($null -ne $result) { Emit-Capture $result }
 
 Clear-Clipboard -ErrorAction SilentlyContinue
-[WinCapture]::SendCtrlCombo(0x43)
-$clip = Wait-ClipboardText
-if (-not [string]::IsNullOrEmpty($clip)) {
-  Emit-ClipboardCapture $clip "clipboardCopy"
-}
-
+# Do not Ctrl+C first — that would capture only the current highlight/selection.
+# Select-all + copy reads the full field when UIA reads fail.
 [WinCapture]::SendCtrlCombo(0x41)
 Start-Sleep -Milliseconds 50
 [WinCapture]::SendCtrlCombo(0x43)

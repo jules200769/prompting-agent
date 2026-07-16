@@ -463,6 +463,18 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
         pendingCaptureText = sanitizeCaptureText(earlyRaw);
       }
     }
+
+    // Non-terminal highlight must not fill the overlay draft (rejected external-selection
+    // UX). Open the same empty compose flow as a miss; terminal selection stays.
+    if (
+      pendingCaptureText &&
+      pendingContextSignals?.hasSelection &&
+      (pendingContextSignals.selectedText?.trim()?.length ?? 0) > 0
+    ) {
+      console.log("[PromptForge] hotkey snapshot: text selection present — compose mode (no draft)");
+      pendingCaptureText = null;
+    }
+
     console.log(
       "[PromptForge] hotkey snapshot:",
       summary ? `hwnd ${summary.hwnd} uia ${summary.uia}` : stdout.trim(),
@@ -489,6 +501,9 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
 /** Whether pre-hide snapshot is enough to skip hide + win-capture.ps1. */
 export function canUseEarlyCaptureFastPath(): boolean {
   if (pendingIsTerminal) return true;
+  // UIA target known — including empty field compose — skip hideForCapture so the
+  // already-visible shell does not dim and pop back (looks like a second popup).
+  if (pendingUiaMeta != null) return true;
   return shouldUseEarlyCaptureFastPath(pendingCaptureText, pendingUiaMeta != null);
 }
 
@@ -526,6 +541,11 @@ function consumeUiaMeta(fromCaptureScript: UiaTargetMeta | null): UiaTargetMeta 
   const meta = fromCaptureScript ?? pendingUiaMeta;
   pendingUiaMeta = null;
   return meta;
+}
+
+/** Non-terminal highlight: do not use selected/field text as the overlay draft. */
+function shouldSkipDraftForSelection(): boolean {
+  return Boolean(pendingContextSignals?.hasSelection && pendingContextSignals.selectedText?.trim());
 }
 
 async function captureViaScript(hwnd: number, metaPath: string): Promise<string> {
@@ -614,6 +634,28 @@ export async function captureSelection(): Promise<CaptureResult> {
 
   const earlyTextPeek = pendingCaptureText;
   const earlyUiaPeek = pendingUiaMeta;
+  if (shouldSkipDraftForSelection()) {
+    pendingCaptureText = null;
+    pendingUiaMeta = null;
+    console.log("[PromptForge] capture: text selection present — compose mode (no draft)");
+    return withCaptureContext({
+      text: "",
+      mode: "empty",
+      snapshot,
+      uia: earlyUiaPeek,
+    });
+  }
+  if (earlyUiaPeek != null && !(earlyTextPeek?.trim())) {
+    pendingCaptureText = null;
+    pendingUiaMeta = null;
+    console.log("[PromptForge] capture: empty field — compose mode");
+    return withCaptureContext({
+      text: "",
+      mode: "empty",
+      snapshot,
+      uia: earlyUiaPeek,
+    });
+  }
   if (shouldUseEarlyCaptureFastPath(earlyTextPeek, earlyUiaPeek != null)) {
     pendingCaptureText = null;
     pendingUiaMeta = null;
