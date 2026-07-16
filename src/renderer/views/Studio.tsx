@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, HistoryItem, HotkeyStatus, LibraryItem, ModelId, OptLevel, WorkbenchSeed } from "../../shared/types";
-import { MODELS, REWRITE_CONFIG, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
+import type { AppSettings, CategoryStylePreset, HistoryItem, HotkeyStatus, LibraryItem, ModelId, OptLevel, WorkbenchSeed } from "../../shared/types";
+import { APP_CATEGORIES, APP_CATEGORY_LABELS, MODELS, REWRITE_CONFIG, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
 import { acceleratorDisplayParts } from "../../shared/accelerator";
 import { api } from "../api";
 import { ScoreRing, RubricChips, ScoreLift } from "../components/Score";
@@ -512,6 +512,32 @@ function Settings() {
               <input type="checkbox" checked={s.screenContext} onChange={(e) => update({ screenContext: e.target.checked })} />
               Screen context — let the hotkey read the active app's title, site, and surrounding text to tailor rewrites (off = prompt text only)
             </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={s.styleMatching} onChange={(e) => update({ styleMatching: e.target.checked })} />
+              Style matching — adapt tone to the destination app category (email, chat, code, terminal…)
+            </label>
+            {s.styleMatching && (
+              <div className="pl-6 space-y-2">
+                {!s.screenContext && <p className="text-[10px] text-muted">Requires Screen context.</p>}
+                <div className="grid grid-cols-2 gap-2">
+                  {APP_CATEGORIES.filter((c) => c !== "other").map((c) => (
+                    <Field key={c} label={APP_CATEGORY_LABELS[c]}>
+                      <select
+                        value={s.styleByCategory?.[c] ?? "auto"}
+                        onChange={(e) => update({ styleByCategory: { ...s.styleByCategory, [c]: e.target.value as CategoryStylePreset } })}
+                        className="w-full bg-bg-800 border border-line rounded-md text-sm px-2 py-1.5"
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="formal">Formal</option>
+                        <option value="neutral">Neutral</option>
+                        <option value="casual">Casual</option>
+                        <option value="off">Off</option>
+                      </select>
+                    </Field>
+                  ))}
+                </div>
+              </div>
+            )}
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={s.telemetry} onChange={(e) => update({ telemetry: e.target.checked })} />
               Allow anonymous telemetry

@@ -5,7 +5,12 @@ export function stripResponseArtifacts(raw: string): string {
   let t = raw.trim();
 
   // Remove common preamble lines.
-  t = t.replace(/^(here(?:'s| is) (?:the )?(?:refined|optimized|improved) prompt:?\s*)/i, "");
+  // Requires the trailing colon so genuine content starting with e.g.
+  // "Here is the explanation" is never eaten.
+  t = t.replace(
+    /^(here(?:'s| is) (?:the |your |a )?(?:refined |optimized |improved |rewritten |revised )?(?:prompt|email|message|question|explanation|draft|version|text):\s*)/i,
+    "",
+  );
 
   const fence = t.match(/^```(?:\w*\n)?([\s\S]*?)```$/);
   if (fence) t = fence[1].trim();

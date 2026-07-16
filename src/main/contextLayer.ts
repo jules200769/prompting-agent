@@ -5,10 +5,12 @@
 import type { CaptureContext, CaptureMode } from "../shared/types";
 import { CONTEXT_CAPS } from "../shared/types";
 import {
+  detectAppCategory,
   detectSite,
   editorKindFromProcess,
   extractFileFromEditorTitle,
   relevantFileMemory,
+  resolveStyleDirective,
   suggestTargetModel,
 } from "../shared/contextSignals";
 import type { HostKind } from "../shared/injectStrategy";
@@ -53,13 +55,21 @@ export function assembleCaptureContext(opts: {
   sidecar: ContextSidecarSignals | null;
   snapshot: SnapshotContextSignals;
 }): CaptureContext | undefined {
-  if (!getSettings().screenContext) return undefined;
+  const settings = getSettings();
+  if (!settings.screenContext) return undefined;
   if (opts.snapshot.isPassword) return undefined;
 
   const processName = opts.snapshot.process;
   const windowTitle = capHead(opts.snapshot.windowTitle?.trim() || undefined, CONTEXT_CAPS.windowTitle);
   const site = detectSite({ processName, windowTitle, url: opts.snapshot.siteUrl }) ?? undefined;
   const editorKind = editorKindFromProcess(processName);
+  const category = detectAppCategory({
+    processName,
+    site,
+    hostKind: opts.snapshot.hostKind,
+    editorKind,
+    elementClassName: opts.uia?.className,
+  });
 
   const ctx: CaptureContext = {};
 
@@ -70,6 +80,7 @@ export function assembleCaptureContext(opts: {
       hostKind: opts.snapshot.hostKind,
       site,
       editorKind,
+      category,
     };
   }
 
@@ -97,6 +108,13 @@ export function assembleCaptureContext(opts: {
     processName,
     elementClassName: opts.uia?.className,
   });
+
+  const styleHint = resolveStyleDirective({
+    category,
+    enabled: settings.styleMatching,
+    preset: settings.styleByCategory?.[category] ?? "auto",
+  });
+  if (styleHint) ctx.styleHint = capHead(styleHint, CONTEXT_CAPS.styleHint);
 
   return ctx;
 }

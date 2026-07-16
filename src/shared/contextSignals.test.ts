@@ -7,6 +7,9 @@ import {
   editorKindFromProcess,
   relevantFileMemory,
   buildDestinationContextBlock,
+  detectAppCategory,
+  resolveStyleDirective,
+  SITE_MODEL_MAP,
 } from "./contextSignals";
 import { CONTEXT_CAPS, type CaptureContext } from "./types";
 
@@ -184,13 +187,147 @@ describe("buildDestinationContextBlock", () => {
     const after = block.match(/after the cursor[^"]*"""(y+)"""/)?.[1] ?? "";
     expect(before.length).toBe(CONTEXT_CAPS.beforeCursor);
     expect(after.length).toBe(CONTEXT_CAPS.afterCursor);
+    // The selected passage must be rendered (regression: it was captured, capped,
+    // and hashed into the cache key but silently dropped from the block).
+    expect(block).toContain("Selected passage being rewritten");
+    expect(block).toContain("middle sentence");
+    // Spatial order: before -> selection -> after.
+    expect(block.indexOf("before the cursor")).toBeLessThan(block.indexOf("Selected passage"));
+    expect(block.indexOf("Selected passage")).toBeLessThan(block.indexOf("after the cursor"));
+  });
+
+  it("renders selectedText even without surrounding cursor text and caps it", () => {
+    const block = buildDestinationContextBlock({
+      text: { scope: "selection", hasSelection: true, selectedText: "s".repeat(6000) },
+    });
+    expect(block).toContain("Selected passage being rewritten");
+    const sel = block.match(/Selected passage being rewritten[^"]*"""(s+)"""/)?.[1] ?? "";
+    expect(sel.length).toBe(CONTEXT_CAPS.selectedText);
+  });
+
+  it("omits the selected-passage line when there is no selection", () => {
+    const block = buildDestinationContextBlock({
+      app: { processName: "chrome", site: "mail.google.com", category: "email" },
+      text: { scope: "field", hasSelection: false },
+    });
+    expect(block).not.toContain("Selected passage being rewritten");
   });
 
   it("contains no formatting mandates (terminal rule stays supreme)", () => {
     const block = buildDestinationContextBlock({
-      app: { processName: "WindowsTerminal", hostKind: "terminal" },
+      app: { processName: "WindowsTerminal", hostKind: "terminal", category: "terminal" },
       text: { scope: "field", hasSelection: false },
+      styleHint: resolveStyleDirective({ category: "terminal", enabled: true }),
     });
     expect(block).not.toMatch(/output format|markdown|xml/i);
+  });
+
+  it("renders the category and style lines", () => {
+    const block = buildDestinationContextBlock({
+      app: { processName: "chrome", site: "mail.google.com", category: "email" },
+      styleHint: "Professional, courteous tone suited to email.",
+    });
+    expect(block).toContain("- Destination category: Email");
+    expect(block).toContain("- Style for this destination: Professional, courteous tone suited to email.");
+  });
+
+  it("renders the block for a styleHint-only context", () => {
+    const block = buildDestinationContextBlock({ styleHint: "Casual, conversational tone." });
+    expect(block).toContain("DESTINATION CONTEXT");
+    expect(block).toContain("- Style for this destination: Casual, conversational tone.");
+  });
+
+  it("caps an oversized styleHint", () => {
+    const block = buildDestinationContextBlock({ styleHint: "z".repeat(1000) });
+    const hint = block.match(/- Style for this destination: (z+)/)?.[1] ?? "";
+    expect(hint.length).toBe(CONTEXT_CAPS.styleHint);
+  });
+
+  it("renders no category line for the 'other' category", () => {
+    const block = buildDestinationContextBlock({
+      app: { processName: "notepad", category: "other" },
+    });
+    expect(block).not.toContain("Destination category");
+  });
+});
+
+describe("detectAppCategory", () => {
+  it("terminal host beats editor identity (Cursor terminal panes)", () => {
+    expect(
+      detectAppCategory({ processName: "cursor", editorKind: "cursor", hostKind: "terminal" }),
+    ).toBe("terminal");
+  });
+
+  it("routes the Cursor AI pane to ai-chat and the editor to code-editor", () => {
+    expect(
+      detectAppCategory({ processName: "cursor", editorKind: "cursor", elementClassName: "aislash-editor-input" }),
+    ).toBe("ai-chat");
+    expect(detectAppCategory({ processName: "cursor", editorKind: "cursor" })).toBe("code-editor");
+    expect(detectAppCategory({ processName: "code", editorKind: "vscode" })).toBe("code-editor");
+    expect(detectAppCategory({ processName: "windsurf", editorKind: "windsurf" })).toBe("code-editor");
+  });
+
+  it("treats every model-routed site as ai-chat", () => {
+    for (const site of Object.keys(SITE_MODEL_MAP)) {
+      expect(detectAppCategory({ processName: "chrome", site })).toBe("ai-chat");
+    }
+    expect(detectAppCategory({ processName: "chrome", site: "perplexity.ai" })).toBe("ai-chat");
+    expect(detectAppCategory({ processName: "chrome", site: "copilot.microsoft.com" })).toBe("ai-chat");
+    expect(detectAppCategory({ processName: "chrome", site: "aistudio.google.com" })).toBe("ai-chat");
+  });
+
+  it("categorizes known sites", () => {
+    expect(detectAppCategory({ processName: "chrome", site: "mail.google.com" })).toBe("email");
+    expect(detectAppCategory({ processName: "chrome", site: "web.whatsapp.com" })).toBe("chat");
+    expect(detectAppCategory({ processName: "chrome", site: "notion.so" })).toBe("docs-notes");
+    expect(detectAppCategory({ processName: "chrome", site: "docs.google.com" })).toBe("docs-notes");
+  });
+
+  it("categorizes processes regardless of .exe suffix or case", () => {
+    expect(detectAppCategory({ processName: "OUTLOOK.EXE" })).toBe("email");
+    expect(detectAppCategory({ processName: "slack" })).toBe("chat");
+    expect(detectAppCategory({ processName: "obsidian" })).toBe("docs-notes");
+    expect(detectAppCategory({ processName: "WindowsTerminal" })).toBe("terminal");
+  });
+
+  it("falls back to other for unknown or empty input", () => {
+    expect(detectAppCategory({})).toBe("other");
+    expect(detectAppCategory({ processName: "chrome", site: "example.com" })).toBe("other");
+  });
+});
+
+describe("resolveStyleDirective", () => {
+  it("returns undefined when disabled, off, or category other", () => {
+    expect(resolveStyleDirective({ category: "email", enabled: false })).toBeUndefined();
+    expect(resolveStyleDirective({ category: "email", enabled: true, preset: "off" })).toBeUndefined();
+    expect(resolveStyleDirective({ category: "other", enabled: true })).toBeUndefined();
+  });
+
+  it("auto returns the category default tone", () => {
+    expect(resolveStyleDirective({ category: "email", enabled: true })).toMatch(/courteous tone suited to email/);
+    expect(resolveStyleDirective({ category: "email", enabled: true, preset: "auto" })).toBe(
+      resolveStyleDirective({ category: "email", enabled: true }),
+    );
+  });
+
+  it("presets swap only the tone sentence, keeping the category format sentence", () => {
+    const format = "Contractions are fine; no formal greetings or sign-offs.";
+    expect(resolveStyleDirective({ category: "chat", enabled: true, preset: "formal" })).toBe(
+      `Formal, professional tone. ${format}`,
+    );
+    expect(resolveStyleDirective({ category: "chat", enabled: true, preset: "casual" })).toBe(
+      `Casual, conversational tone. ${format}`,
+    );
+    expect(resolveStyleDirective({ category: "chat", enabled: true, preset: "neutral" })).toBe(
+      `Neutral, plain tone. ${format}`,
+    );
+  });
+
+  it("no terminal preset ever mandates an output format", () => {
+    for (const preset of ["auto", "formal", "neutral", "casual"] as const) {
+      expect(resolveStyleDirective({ category: "terminal", enabled: true, preset })).not.toMatch(
+        /output format|multi-line|markdown/i,
+      );
+    }
   });
 });

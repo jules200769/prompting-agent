@@ -11,6 +11,7 @@ export interface CacheKeyRequest {
   context?: string;
   terminalContext?: boolean;
   promptType?: string;
+  writingType?: string;
   captureContext?: CaptureContext;
 }
 
@@ -41,6 +42,8 @@ export function canonicalContextString(ctx: CaptureContext | undefined): string 
     ctx.text?.afterCursor ?? "",
     ctx.files?.activeFile ?? "",
     (ctx.files?.recentFiles ?? []).join(","),
+    ctx.app?.category ?? "",
+    ctx.styleHint ?? "",
   ];
   // All-empty context contributes nothing (same key as no context).
   if (fields.every((f) => f === "")) return "";
@@ -50,7 +53,8 @@ export function canonicalContextString(ctx: CaptureContext | undefined): string 
 export function buildCacheKey(version: number, req: CacheKeyRequest): string {
   const term = req.terminalContext ? "|terminal" : "";
   const type = req.promptType && req.promptType !== "auto" ? `|type:${req.promptType}` : "";
+  const writing = req.writingType ? `|writing:${req.writingType}` : "";
   const canonical = canonicalContextString(req.captureContext);
   const ctx = canonical ? `|ctx:${fnv1a(canonical)}` : "";
-  return `v${version}|${req.model}|${req.level}|${req.persona ?? ""}|${req.context ?? ""}${term}${type}${ctx}|${req.prompt.trim().toLowerCase()}`;
+  return `v${version}|${req.model}|${req.level}|${req.persona ?? ""}|${req.context ?? ""}${term}${type}${writing}${ctx}|${req.prompt.trim().toLowerCase()}`;
 }

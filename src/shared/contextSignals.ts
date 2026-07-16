@@ -2,8 +2,9 @@
 // Site detection, target-model routing, editor file-name heuristics, and the
 // DESTINATION CONTEXT meta-prompt block renderer.
 
-import type { CaptureContext, ModelId } from "./types";
-import { CONTEXT_CAPS } from "./types";
+import type { AppCategory, CaptureContext, CategoryStylePreset, ModelId } from "./types";
+import { APP_CATEGORY_LABELS, CONTEXT_CAPS } from "./types";
+import type { HostKind } from "./injectStrategy";
 
 /** Browser processes whose window may identify a target site (lowercase, no .exe). */
 const BROWSER_PROCESS_NAMES = new Set([
@@ -99,6 +100,158 @@ export function suggestTargetModel(opts: {
     return "composer-2.5";
   }
   return undefined;
+}
+
+/** AI-chat destinations beyond the model-routing map (no target model of their own). */
+const EXTRA_AI_CHAT_SITES = new Set([
+  "perplexity.ai",
+  "copilot.microsoft.com",
+  "aistudio.google.com",
+]);
+
+/** Site host → category (non-AI-chat destinations). */
+const SITE_CATEGORY_MAP: Record<string, AppCategory> = {
+  "mail.google.com": "email",
+  "outlook.live.com": "email",
+  "outlook.office.com": "email",
+  "mail.proton.me": "email",
+  "web.whatsapp.com": "chat",
+  "discord.com": "chat",
+  "slack.com": "chat",
+  "app.slack.com": "chat",
+  "teams.microsoft.com": "chat",
+  "teams.live.com": "chat",
+  "web.telegram.org": "chat",
+  "notion.so": "docs-notes",
+  "docs.google.com": "docs-notes",
+  "keep.google.com": "docs-notes",
+};
+
+/** Normalized process name → category (no .exe, lowercase). */
+const PROCESS_CATEGORY_MAP: Record<string, AppCategory> = {
+  outlook: "email",
+  olk: "email",
+  thunderbird: "email",
+  slack: "chat",
+  discord: "chat",
+  teams: "chat",
+  "ms-teams": "chat",
+  msteams: "chat",
+  whatsapp: "chat",
+  telegram: "chat",
+  signal: "chat",
+  notion: "docs-notes",
+  obsidian: "docs-notes",
+  winword: "docs-notes",
+  onenote: "docs-notes",
+  logseq: "docs-notes",
+  typora: "docs-notes",
+  evernote: "docs-notes",
+  windowsterminal: "terminal",
+  wt: "terminal",
+  powershell: "terminal",
+  pwsh: "terminal",
+  cmd: "terminal",
+  conhost: "terminal",
+  mintty: "terminal",
+  alacritty: "terminal",
+  "wezterm-gui": "terminal",
+  hyper: "terminal",
+};
+
+/**
+ * Classify the destination into an app category. Terminal host wins over editor
+ * identity (Cursor terminal panes are terminals); Cursor's AI pane is an AI chat.
+ * Deliberately no window-title regexes — titles already reach us via detectSite().
+ */
+export function detectAppCategory(opts: {
+  processName?: string;
+  site?: string | null;
+  hostKind?: HostKind;
+  editorKind?: "cursor" | "vscode" | "windsurf";
+  elementClassName?: string;
+}): AppCategory {
+  if (opts.hostKind === "terminal") return "terminal";
+
+  if (opts.editorKind) {
+    if (CURSOR_CHAT_ELEMENT_RE.test(opts.elementClassName ?? "")) return "ai-chat";
+    return "code-editor";
+  }
+
+  const site = opts.site ?? undefined;
+  if (site) {
+    if (SITE_MODEL_MAP[site] || EXTRA_AI_CHAT_SITES.has(site)) return "ai-chat";
+    const siteCategory = SITE_CATEGORY_MAP[site];
+    if (siteCategory) return siteCategory;
+  }
+
+  const proc = normalizeProcessName(opts.processName);
+  if (proc && PROCESS_CATEGORY_MAP[proc]) return PROCESS_CATEGORY_MAP[proc];
+
+  return "other";
+}
+
+const TONE_SENTENCES: Record<Exclude<CategoryStylePreset, "auto" | "off">, string> = {
+  formal: "Formal, professional tone.",
+  neutral: "Neutral, plain tone.",
+  casual: "Casual, conversational tone.",
+};
+
+/**
+ * Per-category directive: the "auto" tone sentence plus the format sentence that
+ * always applies. Splitting them lets a preset swap only the tone half.
+ *
+ * The terminal entry must never mention output format, multi-line, or markdown —
+ * the TERMINAL SHELL contract in buildMetaPrompt owns that and must keep authority.
+ */
+const CATEGORY_DIRECTIVES: Record<
+  Exclude<AppCategory, "other">,
+  { autoTone: string; format: string }
+> = {
+  "ai-chat": {
+    autoTone: "Direct, neutral wording aimed at an AI assistant.",
+    format: "Full sentences; structure follows the contract above.",
+  },
+  "code-editor": {
+    autoTone: "Technical and precise.",
+    format: "Keep identifiers, file names, and error text verbatim; no pleasantries or filler.",
+  },
+  terminal: {
+    autoTone: "Terse, imperative shell wording.",
+    format: "No pleasantries, no filler words.",
+  },
+  email: {
+    autoTone: "Professional, courteous tone suited to email.",
+    format:
+      "Complete sentences; follow normal greeting and sign-off conventions when the text is a message.",
+  },
+  chat: {
+    autoTone: "Casual, brief tone suited to instant messaging.",
+    format: "Contractions are fine; no formal greetings or sign-offs.",
+  },
+  "docs-notes": {
+    autoTone: "Clear, well-organized prose suited to a document.",
+    format: "Headings and bullet lists are acceptable when they aid structure.",
+  },
+};
+
+/**
+ * Resolve the style directive for a category under the user's settings.
+ * Undefined (renders nothing) when disabled, preset "off", or category "other".
+ */
+export function resolveStyleDirective(opts: {
+  category: AppCategory;
+  enabled: boolean;
+  preset?: CategoryStylePreset;
+}): string | undefined {
+  if (!opts.enabled) return undefined;
+  if (opts.category === "other") return undefined;
+  const preset = opts.preset ?? "auto";
+  if (preset === "off") return undefined;
+
+  const directive = CATEGORY_DIRECTIVES[opts.category];
+  const tone = preset === "auto" ? directive.autoTone : TONE_SENTENCES[preset];
+  return `${tone} ${directive.format}`;
 }
 
 /** Wispr rule: contains a dot, no whitespace, starts with a letter, ≤80 chars, no path chars. */
@@ -213,6 +366,12 @@ export function buildDestinationContextBlock(ctx: CaptureContext | undefined): s
   if (app?.site) {
     lines.push(`- Website: ${app.site}`);
   }
+  if (app?.category && app.category !== "other") {
+    lines.push(`- Destination category: ${APP_CATEGORY_LABELS[app.category]}`);
+  }
+  if (ctx.styleHint?.trim()) {
+    lines.push(`- Style for this destination: ${cap(ctx.styleHint.trim(), CONTEXT_CAPS.styleHint)}`);
+  }
 
   const text = ctx.text;
   if (text) {
@@ -226,6 +385,11 @@ export function buildDestinationContextBlock(ctx: CaptureContext | undefined): s
     if (text.beforeCursor?.trim()) {
       lines.push(
         `- Text before the cursor (context only — NEVER repeat or rewrite it in the output): """${capTail(text.beforeCursor, CONTEXT_CAPS.beforeCursor)}"""`,
+      );
+    }
+    if (text.selectedText?.trim()) {
+      lines.push(
+        `- Selected passage being rewritten (your output REPLACES this in place — make it read consistently with the surrounding before/after text; do not copy it back verbatim): """${cap(text.selectedText, CONTEXT_CAPS.selectedText)}"""`,
       );
     }
     if (text.afterCursor?.trim()) {

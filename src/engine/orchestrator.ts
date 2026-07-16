@@ -7,6 +7,7 @@ import { getPack } from "./packs";
 import { analyze, adherenceLevel, emptySubscores } from "./rubric";
 import { buildDiff } from "./diff";
 import { stripResponseArtifacts } from "./cleanRewrite";
+import { writingToneLabel } from "./writing";
 import { toTerminalSingleLine, stripTerminalStreamChunk } from "../shared/terminalOutput";
 import { optimizeStream } from "./providers";
 import { keyStore } from "../main/keyStore";
@@ -45,6 +46,7 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
         context: request.context,
         terminalContext: request.terminalContext,
         promptType: request.promptType,
+        writingType: request.writingType,
         captureContext: request.captureContext,
         apiKey,
       },
@@ -72,11 +74,16 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
   const adherenceLabel = LEVEL_LABELS[measuredAdherence];
   const diff = buildDiff(request.prompt, optimizedPrompt);
 
-  const notes = [
-    `Applied ${pack.label} prompting guide (L${request.level} ${levelLabel} target).`,
-    `Guide-structuur: ${adherenceLabel} (L${measuredAdherence}).`,
-    "Local rubric score — refined prompt follows model-specific guide.",
-  ];
+  const notes = request.writingType
+    ? [
+        `Rewrote draft as ${request.writingType} — ${writingToneLabel(request.writingType, request.level)} (L${request.level}).`,
+        "Writing mode: output is the finished text, not a prompt.",
+      ]
+    : [
+        `Applied ${pack.label} prompting guide (L${request.level} ${levelLabel} target).`,
+        `Guide-structuur: ${adherenceLabel} (L${measuredAdherence}).`,
+        "Local rubric score — refined prompt follows model-specific guide.",
+      ];
 
   return {
     optimizedPrompt,

@@ -1,2 +1,0 @@
-<instructions>Expert React developer: Fix the lag issue in a TypeScript React app's search box with around 500 items by addressing rerender performance without changing the UI or breaking filtering functionality.</instructions>
-<input>my react app lags when users type in the search box. the list has around 500 items. probably a rerender issue? fix it but dont change the ui or break filtering. typescript.</input>

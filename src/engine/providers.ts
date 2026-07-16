@@ -2,11 +2,12 @@
 // model's prompting guide supplies the prompt-engineering methodology.
 
 import OpenAI from "openai";
-import type { CaptureContext, ModelId, OptLevel, PromptType } from "../shared/types";
+import type { CaptureContext, ModelId, OptLevel, PromptType, WritingType } from "../shared/types";
 import { REWRITE_CONFIG } from "../shared/types";
 import { buildDestinationContextBlock } from "../shared/contextSignals";
 import { getPack } from "./packs";
 import { getGuideExcerpt, getLevelRewriteInstruction, getLevelStructureContract } from "./guideLoader";
+import { buildWritingMetaPrompt } from "./writing";
 
 export interface OptimizeParams {
   prompt: string;
@@ -19,6 +20,8 @@ export interface OptimizeParams {
   terminalContext?: boolean;
   /** Overlay type hint; "auto"/undefined adds nothing. */
   promptType?: PromptType;
+  /** Writing mode: compose the deliverable itself instead of refining a prompt. */
+  writingType?: WritingType;
   /** Destination context from hotkey capture; renders the DESTINATION CONTEXT block. */
   captureContext?: CaptureContext;
 }
@@ -161,7 +164,17 @@ ${params.terminalContext ? "- ONE line only — no \\n or paragraph breaks anywh
 
 export async function optimizeStream(params: OptimizeParams, cb: StreamCallbacks): Promise<RawResult> {
   const client = new OpenAI({ apiKey: params.apiKey });
-  const { system, user } = buildMetaPrompt(params);
+  // Writing mode composes the deliverable itself; prompting mode refines a prompt.
+  const { system, user } = params.writingType
+    ? buildWritingMetaPrompt({
+        prompt: params.prompt,
+        writingType: params.writingType,
+        level: params.level,
+        context: params.context,
+        captureContext: params.captureContext,
+        terminalContext: params.terminalContext,
+      })
+    : buildMetaPrompt(params);
   let full = "";
   const stream = await client.chat.completions.create({
     model: REWRITE_CONFIG.modelId,

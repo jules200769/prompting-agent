@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -11,9 +10,11 @@ import { flushSync } from "react-dom";
 import { api } from "../api";
 import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
 import type { CaptureContext, CaptureMode, ModelId, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
-import { MODELS, LEVEL_LABELS, LEVEL_COLORS, PROMPT_TYPES, PROMPT_TYPE_LABELS } from "../../shared/types";
+import { MODELS, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
 import { toTerminalSingleLine, stripTerminalStreamChunk } from "../../shared/terminalOutput";
 import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
+import { ModelPicker } from "../components/ModelPicker";
+import { WritingTypePicker, type WritingType, writingLevelLabels } from "../components/WritingTypePicker";
 
 type Phase = "idle" | "capturing" | "optimizing" | "done" | "error";
 
@@ -27,14 +28,6 @@ function MoreIcon() {
   );
 }
 
-function ChevronDown() {
-  return (
-    <svg width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden className="opacity-90">
-      <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 const SLIDER_TRACK_W = 132;
 const SLIDER_EDGE = 13;
 
@@ -42,11 +35,14 @@ function LevelSlider({
   level,
   onChange,
   disabled,
+  labels = LEVEL_LABELS,
 }: {
   level: OptLevel;
   onChange: (l: OptLevel) => void;
   disabled?: boolean;
+  labels?: Record<OptLevel, string>;
 }) {
+  const activeLabel = labels[level];
   const levels = [1, 2, 3, 4] as OptLevel[];
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -100,7 +96,7 @@ function LevelSlider({
     <div
       className="level-slider flex items-center gap-2.5 shrink-0"
       role="group"
-      aria-label={`Guide depth L${level} ${LEVEL_LABELS[level]}`}
+      aria-label={`Guide depth L${level} ${activeLabel}`}
     >
       <div
         ref={trackRef}
@@ -113,7 +109,7 @@ function LevelSlider({
         aria-valuemin={1}
         aria-valuemax={4}
         aria-valuenow={level}
-        aria-valuetext={`L${level} ${LEVEL_LABELS[level]}`}
+        aria-valuetext={`L${level} ${activeLabel}`}
         aria-disabled={disabled}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -141,122 +137,49 @@ function LevelSlider({
         />
       </div>
       <span
-        key={level}
-        className="level-slider__label text-[13px] font-semibold leading-none select-none text-left"
-        style={{ color: LEVEL_COLORS[level], width: 34 }}
+        key={`${level}-${activeLabel}`}
+        className="level-slider__label text-[13px] font-semibold leading-none select-none text-left whitespace-nowrap"
+        style={{ color: LEVEL_COLORS[level], minWidth: 34 }}
       >
-        {LEVEL_LABELS[level]}
+        {activeLabel}
       </span>
     </div>
   );
 }
 
-function modelDisplayLabel(id: ModelId): string {
-  const m = MODELS.find((x) => x.id === id);
-  if (!m) return id;
-  return m.label.replace("Claude Opus 4.8", "Opus4.8").replace("Claude ", "").replace(" Pro", "");
-}
+type OverlaySegmentMode = "prompting" | "writing";
 
-/** Width-measured select: chevron sits a fixed ~7px after the selected label. */
-function MeasuredSelect({
+function ModeSegmentPill({
   value,
-  options,
   onChange,
   disabled,
-  ariaLabel,
-  textClass = "text-[15px]",
 }: {
-  value: string;
-  options: { value: string; label: string }[];
-  onChange: (value: string) => void;
+  value: OverlaySegmentMode;
+  onChange: (mode: OverlaySegmentMode) => void;
   disabled?: boolean;
-  ariaLabel: string;
-  textClass?: string;
 }) {
-  const measureRef = useRef<HTMLSpanElement>(null);
-  const [textWidth, setTextWidth] = useState(0);
-  const displayLabel = options.find((o) => o.value === value)?.label ?? value;
-  const chevronGap = 7;
-  const chevronWidth = 10;
-  const selectWidth = textWidth + chevronGap + chevronWidth;
-
-  useLayoutEffect(() => {
-    if (!measureRef.current) return;
-    setTextWidth(measureRef.current.offsetWidth);
-  }, [displayLabel]);
-
   return (
-    <div className={`relative inline-block ${textClass} font-medium text-white`}>
-      <span
-        ref={measureRef}
-        aria-hidden
-        className={`invisible absolute whitespace-nowrap font-medium ${textClass} pointer-events-none`}
-      >
-        {displayLabel}
-      </span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        aria-label={ariaLabel}
-        style={{ width: selectWidth || undefined }}
-        className={`appearance-none bg-transparent border-0 pl-0 pr-0 py-0 ${textClass} font-medium text-white focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/30 focus-visible:outline-offset-2 cursor-pointer disabled:opacity-50`}
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value} className="bg-bg-900 text-white">
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <span
-        className="pointer-events-none absolute top-1/2 -translate-y-1/2"
-        style={{ left: textWidth + chevronGap }}
-      >
-        <ChevronDown />
-      </span>
+    <div
+      className="inline-flex items-center rounded-full p-0.5 bg-white/10 border border-white/15 shrink-0"
+      role="group"
+      aria-label="Mode"
+    >
+      {(["prompting", "writing"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(option)}
+          className={`px-3 py-1 rounded-full text-[13px] font-medium leading-none inline-flex items-center justify-center transition disabled:opacity-50 disabled:cursor-not-allowed ${
+            value === option
+              ? "bg-white/25 text-white shadow-sm"
+              : "text-white/55 hover:text-white/75"
+          }`}
+        >
+          <span className="inline-block -translate-y-0.5">{option}</span>
+        </button>
+      ))}
     </div>
-  );
-}
-
-function ModelPicker({
-  model,
-  onChange,
-  disabled,
-}: {
-  model: ModelId;
-  onChange: (id: ModelId) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <MeasuredSelect
-      value={model}
-      options={MODELS.map((m) => ({ value: m.id, label: modelDisplayLabel(m.id) }))}
-      onChange={(v) => onChange(v as ModelId)}
-      disabled={disabled}
-      ariaLabel="Target model"
-      textClass="text-[13px]"
-    />
-  );
-}
-
-function PromptTypePicker({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: PromptType;
-  onChange: (t: PromptType) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <MeasuredSelect
-      value={value}
-      options={PROMPT_TYPES.map((t) => ({ value: t, label: PROMPT_TYPE_LABELS[t] }))}
-      onChange={(v) => onChange(v as PromptType)}
-      disabled={disabled}
-      ariaLabel="Prompt type"
-      textClass="text-[13px]"
-    />
   );
 }
 
@@ -288,6 +211,8 @@ export function Overlay() {
   const [model, setModel] = useState<ModelId>("claude-opus-4.8");
   const [level, setLevel] = useState<OptLevel>(2);
   const [promptType, setPromptType] = useState<PromptType>("auto");
+  const [segmentMode, setSegmentMode] = useState<OverlaySegmentMode>("prompting");
+  const [writingType, setWritingType] = useState<WritingType>("question");
   const [overlayPlacement, setOverlayPlacement] = useState<OverlayPlacement>("center");
   const [prompt, setPrompt] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
@@ -306,7 +231,6 @@ export function Overlay() {
   const [shellVisible, setShellVisible] = useState(false);
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [terminalContext, setTerminalContext] = useState(false);
-  const [suggestedModel, setSuggestedModel] = useState<ModelId | null>(null);
   const captureRef = useRef<{
     text: string;
     mode: CaptureMode;
@@ -349,7 +273,8 @@ export function Overlay() {
       setApplyNotice(null);
       setTerminalContext(false);
       setPromptType("auto");
-      setSuggestedModel(null);
+      setSegmentMode("prompting");
+      setWritingType("question");
       setShellVisible(false);
     });
     ackOverlayPrepared();
@@ -381,11 +306,12 @@ export function Overlay() {
         };
         // Destination-aware model preselect: suggestion wins for this session,
         // manual pick afterwards wins for the run; defaultModel is never written.
-        setSuggestedModel(detail.context?.suggestedModel ?? null);
         setModel(detail.context?.suggestedModel ?? defaultModelRef.current);
         setMode(detail.mode);
         setTerminalContext(Boolean(detail.terminalContext));
         setPromptType("auto");
+        setSegmentMode("prompting");
+        setWritingType("question");
         setPrompt(detail.text);
         setPhase("idle");
         resetTypewriter();
@@ -403,6 +329,8 @@ export function Overlay() {
       setMode("field");
       setTerminalContext(false);
       setPromptType("auto");
+      setSegmentMode("prompting");
+      setWritingType("question");
       setPrompt("");
       setPhase("capturing");
       resetTypewriter();
@@ -449,6 +377,7 @@ export function Overlay() {
           skipCache: hasGenerated,
           terminalContext: isTerminalSession,
           promptType,
+          writingType: segmentMode === "writing" ? writingType : undefined,
           captureContext: captureRef.current?.context,
         },
         isTerminalSession ? (chunk) => appendTarget(stripTerminalStreamChunk(chunk)) : appendTarget,
@@ -544,7 +473,7 @@ export function Overlay() {
     ? "Capturing…"
     : busy
       ? "Refining…"
-      : "Output will appear here";
+      : "Session context: off";
 
   const keyMissingError = phase === "error" && outputText.includes("API key not configured");
   const phaseAnnouncement = capturing
@@ -569,9 +498,6 @@ export function Overlay() {
       </div>
       <div className={`relative w-full max-w-[578px] ${shellVisible ? "" : "invisible"}`}>
         {/* Folder tabs — tucked behind the card (z-0 under the card's z-10) for depth. */}
-        <div className="apple-glass-tab apple-glass-tab--top -top-[26px] left-16 h-[36px] px-5 pt-[3px] text-white">
-          <PromptTypePicker value={promptType} onChange={setPromptType} disabled={controlsDisabled} />
-        </div>
         <div
           className="apple-glass-tab apple-glass-tab--left -left-[26px] top-1/2 -translate-y-1/2 w-[36px] h-[158px] flex items-center justify-start pl-[7px]"
           aria-hidden
@@ -660,7 +586,12 @@ export function Overlay() {
                   <GlassPill onClick={() => void runOptimize()} disabled={!canRefine}>
                     {busy ? "Refining…" : hasGenerated ? "Regenerate" : "Generate"}
                   </GlassPill>
-                  <LevelSlider level={level} onChange={setLevel} disabled={controlsDisabled} />
+                  <LevelSlider
+                    level={level}
+                    onChange={setLevel}
+                    disabled={controlsDisabled}
+                    labels={segmentMode === "writing" ? writingLevelLabels(writingType) : LEVEL_LABELS}
+                  />
                 </div>
               </div>
 
@@ -699,12 +630,12 @@ export function Overlay() {
 
             <div className="flex items-center gap-3 px-1 min-h-[36px]">
               <div className="flex items-center gap-3 min-w-0">
-                <ModelPicker model={model} onChange={setModel} disabled={controlsDisabled} />
-                {suggestedModel != null && model === suggestedModel && (
-                  <span className="text-[10px] uppercase tracking-wider text-white/45 select-none" title="Suggested from the destination app">
-                    auto
-                  </span>
+                {segmentMode === "prompting" ? (
+                  <ModelPicker model={model} onChange={setModel} disabled={controlsDisabled} />
+                ) : (
+                  <WritingTypePicker value={writingType} onChange={setWritingType} disabled={controlsDisabled} />
                 )}
+                <ModeSegmentPill value={segmentMode} onChange={setSegmentMode} disabled={controlsDisabled} />
                 <span className="sr-only">{modelLabel}</span>
                 {applyNotice && (
                   <span className="text-[13px] text-warn truncate" role="status">

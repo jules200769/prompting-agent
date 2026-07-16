@@ -67,7 +67,41 @@ export const CONTEXT_CAPS = {
   afterCursor: 500,
   windowTitle: 200,
   files: 10,
+  styleHint: 300,
 } as const;
+
+/** Destination app category — drives the style directive applied to the rewrite. */
+export type AppCategory =
+  | "ai-chat"
+  | "code-editor"
+  | "terminal"
+  | "email"
+  | "chat"
+  | "docs-notes"
+  | "other";
+
+export const APP_CATEGORIES: AppCategory[] = [
+  "ai-chat",
+  "code-editor",
+  "terminal",
+  "email",
+  "chat",
+  "docs-notes",
+  "other",
+];
+
+export const APP_CATEGORY_LABELS: Record<AppCategory, string> = {
+  "ai-chat": "AI chat",
+  "code-editor": "Code editor",
+  terminal: "Terminal",
+  email: "Email",
+  chat: "Chat & messaging",
+  "docs-notes": "Docs & notes",
+  other: "Other",
+};
+
+/** Per-category tone selection; "auto" uses the category default, "off" disables the directive. */
+export type CategoryStylePreset = "auto" | "formal" | "neutral" | "casual" | "off";
 
 /**
  * Structured destination signal captured at hotkey time (screenContext setting on).
@@ -81,6 +115,8 @@ export interface CaptureContext {
     /** Normalized site host for browser targets (e.g. "claude.ai"). */
     site?: string;
     editorKind?: "cursor" | "vscode" | "windsurf";
+    /** Destination app category, resolved from process/site/host signals. */
+    category?: AppCategory;
   };
   text?: {
     scope: ContextTextScope;
@@ -95,7 +131,33 @@ export interface CaptureContext {
   };
   /** UI preselect only — never rendered into the meta-prompt block. */
   suggestedModel?: ModelId;
+  /**
+   * Resolved, settings-aware style directive for the destination category.
+   * Rendered into the DESTINATION CONTEXT block; absent when style matching is
+   * disabled, the category preset is "off", or the category is "other".
+   */
+  styleHint?: string;
 }
+
+/**
+ * Overlay writing mode deliverable. When set on a request the output is the
+ * final written text itself (an email, chat message, …) — not a refined prompt.
+ */
+export type WritingType = "question" | "email" | "message" | "explain";
+
+export const WRITING_TYPES: WritingType[] = ["question", "email", "message", "explain"];
+
+/**
+ * L1–L4 slider labels per writing type (colors stay Cool→Max). Single source of
+ * truth: the overlay slider shows these AND the engine derives its tone
+ * instructions from the same names.
+ */
+export const WRITING_LEVEL_LABELS: Record<WritingType, Record<OptLevel, string>> = {
+  email: { 1: "Structure", 2: "Formal", 3: "Friendly", 4: "Informal" },
+  question: { 1: "Structure", 2: "Closed", 3: "Open", 4: "Auto" },
+  explain: { 1: "Structure", 2: "Simple", 3: "Technical", 4: "Step by step" },
+  message: { 1: "Structure", 2: "Informal", 3: "Formal", 4: "Auto" },
+};
 
 /** Overlay top-tab prompt type: shapes the rewrite deliverable; "auto" adds no hint. */
 export type PromptType = "auto" | "question" | "prompt" | "letter";
@@ -156,6 +218,8 @@ export interface OptimizeRequest {
   promptType?: PromptType;
   /** Terminal capture: refined output must be a single line (no newlines) for shell paste. */
   terminalContext?: boolean;
+  /** Writing mode: rewrite the input as this deliverable (level = tone via WRITING_LEVEL_LABELS). */
+  writingType?: WritingType;
   /** Destination context captured at hotkey time (screenContext on); shapes the rewrite fit. */
   captureContext?: CaptureContext;
 }
@@ -220,6 +284,10 @@ export interface AppSettings {
   onboardingDone: boolean;
   /** Hotkey may read active-app title/site/surrounding text to tailor rewrites; off = prompt text only. */
   screenContext: boolean;
+  /** Adapt rewrite tone to the destination app category; requires screenContext. */
+  styleMatching: boolean;
+  /** Per-category tone override; unset entries fall back to "auto". */
+  styleByCategory: Partial<Record<AppCategory, CategoryStylePreset>>;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -235,6 +303,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   overlayPlacement: "center",
   onboardingDone: false,
   screenContext: true,
+  styleMatching: true,
+  styleByCategory: {},
 };
 
 /** Result of persisting settings; `ok` is false only when the hotkey was rejected and reverted. */

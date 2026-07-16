@@ -15,5 +15,6 @@
     "noUnusedParameters": true,
     "types": ["node"]
   },
-  "include": ["src/main", "src/preload", "src/shared", "src/engine"]
+  "include": ["src/main", "src/preload", "src/shared", "src/engine"],
+  "exclude": ["**/*.test.ts"]
 }

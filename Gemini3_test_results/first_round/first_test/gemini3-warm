@@ -1,2 +1,0 @@
-Persona: React developer. Task: Fix lag in search box input without changing UI or breaking filtering in a TypeScript React app.  
-Input: my react app lags when users type in the search box. the list has around 500 items. probably a rerender issue? fix it but dont change the ui or break filtering. typescript.

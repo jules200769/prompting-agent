@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildMetaPrompt } from "./providers";
-import { CONTEXT_CAPS, type CaptureContext } from "../shared/types";
+import {
+  CONTEXT_CAPS,
+  type CaptureContext,
+} from "../shared/types";
 
 const base = {
   prompt: "fix the login bug",
@@ -36,8 +39,9 @@ describe("buildMetaPrompt destination context", () => {
 
   it("coexists with TERMINAL SHELL — terminal rule stays intact and supreme", () => {
     const termCtx: CaptureContext = {
-      app: { processName: "WindowsTerminal", hostKind: "terminal" },
+      app: { processName: "WindowsTerminal", hostKind: "terminal", category: "terminal" },
       text: { scope: "field", hasSelection: false },
+      styleHint: "Terse, imperative shell wording. No pleasantries, no filler words.",
     };
     const { system } = buildMetaPrompt({ ...base, terminalContext: true, captureContext: termCtx });
     expect(system).toContain("TERMINAL SHELL (mandatory — overrides structure contract above)");
@@ -71,4 +75,29 @@ describe("buildMetaPrompt destination context", () => {
     expect(destIdx).toBeGreaterThan(-1);
     expect(standingIdx).toBeGreaterThan(destIdx);
   });
+
+  it("renders the style directive inside the destination block", () => {
+    const styled: CaptureContext = {
+      app: { processName: "chrome", site: "mail.google.com", category: "email" },
+      styleHint: "Professional, courteous tone suited to email.",
+    };
+    const { system } = buildMetaPrompt({ ...base, captureContext: styled });
+    const block = system.slice(system.indexOf("DESTINATION CONTEXT"), system.indexOf("OUTPUT RULES"));
+    expect(block).toContain("- Destination category: Email");
+    expect(block).toContain("- Style for this destination: Professional, courteous tone suited to email.");
+  });
+
+  it("orders the style directive after the model rules and before standing context", () => {
+    const styled: CaptureContext = {
+      app: { processName: "chrome", site: "mail.google.com", category: "email" },
+      styleHint: "Professional, courteous tone suited to email.",
+    };
+    const { system } = buildMetaPrompt({ ...base, context: "audience: B2B founders", captureContext: styled });
+    const styleIdx = system.indexOf("- Style for this destination:");
+    const destIdx = system.indexOf("DESTINATION CONTEXT");
+    const standingIdx = system.indexOf("Standing context to incorporate");
+    expect(styleIdx).toBeGreaterThan(destIdx);
+    expect(standingIdx).toBeGreaterThan(styleIdx);
+  });
+
 });

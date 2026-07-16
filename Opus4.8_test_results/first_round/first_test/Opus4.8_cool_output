@@ -1,6 +1,0 @@
-<instructions>
-  Diagnose and fix the performance lag in a React app's search box where users type to filter a list of around 500 items. 
-  The issue is likely caused by excessive rerendering. 
-  Provide a solution that improves performance without changing the UI or breaking the filtering functionality. 
-  Use TypeScript in your solution.
-</instructions>
