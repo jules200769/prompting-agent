@@ -435,11 +435,6 @@ export function Overlay() {
     onCopy: () => void onCopy(),
   };
 
-  // Compose mode (nothing captured): typing is the next action — focus the Original field.
-  useEffect(() => {
-    if (mode === "empty") promptRef.current?.focus();
-  }, [mode]);
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const { mode: m, phase: p, captureFailed: failed } = keyStateRef.current;
