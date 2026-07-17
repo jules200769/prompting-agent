@@ -11,6 +11,16 @@ import {
   type SettingsSetResult,
 } from "../shared/types";
 import { devBridgeOptimize, devBridgeSettingsGet } from "./devBridgeClient";
+import {
+  clampContextText,
+  deriveProjectTitle,
+  deriveSessionTitle,
+  NEW_SESSION_TITLE,
+  PROJECT_CONTEXT_MAX_CHARS,
+  PROJECTS_MAX,
+  type ProjectContext,
+  type SessionContext,
+} from "../shared/session";
 
 declare global {
   interface Window {
@@ -38,6 +48,30 @@ type OverlayShowPayload = {
  * Requires `npm run dev` (Vite + Electron). Inside Electron the real preload
  * always wins.
  */
+// Session state for the browser mock — in-memory only, per page load.
+const mockSessions: SessionContext[] = [];
+let mockActiveSessionId: string | null = null;
+const mockProjects: ProjectContext[] = [];
+let mockActiveProjectId: string | null = null;
+let mockProjectContext = "";
+
+function mockEvictProjects(): void {
+  while (mockProjects.length > PROJECTS_MAX) {
+    const evictable = mockProjects
+      .filter((p) => p.id !== mockActiveProjectId)
+      .sort((a, b) => a.updatedAt - b.updatedAt)[0];
+    if (!evictable) break;
+    const idx = mockProjects.findIndex((p) => p.id === evictable.id);
+    if (idx >= 0) mockProjects.splice(idx, 1);
+    for (let i = mockSessions.length - 1; i >= 0; i--) {
+      if (mockSessions[i].projectId === evictable.id) {
+        if (mockActiveSessionId === mockSessions[i].id) mockActiveSessionId = null;
+        mockSessions.splice(i, 1);
+      }
+    }
+  }
+}
+
 function createBrowserMock(): PromptForgeAPI {
   const SAMPLE_PROMPT =
     "write a function that fetches users from an api and shows them in a list";
@@ -93,6 +127,119 @@ function createBrowserMock(): PromptForgeAPI {
 
     historyList: async () => [],
     historyClear: async () => undefined,
+
+    sessionList: async () => [...mockSessions].sort((a, b) => b.updatedAt - a.updatedAt),
+    sessionCreate: async (projectId?: string | null) => {
+      const now = Date.now();
+      const linked =
+        projectId && mockProjects.some((p) => p.id === projectId) ? projectId : null;
+      const session: SessionContext = {
+        id: `mock-${now}-${mockSessions.length}`,
+        title: NEW_SESSION_TITLE,
+        contextText: "",
+        projectId: linked,
+        createdAt: now,
+        updatedAt: now,
+      };
+      mockSessions.push(session);
+      mockActiveSessionId = session.id;
+      return session;
+    },
+    sessionSetContext: async (id: string, text: string) => {
+      const session = mockSessions.find((s) => s.id === id);
+      if (!session) return null;
+      session.contextText = clampContextText(text);
+      session.title = deriveSessionTitle(session.contextText, session.createdAt);
+      session.updatedAt = Date.now();
+      return session;
+    },
+    sessionClear: async (id: string) => {
+      const session = mockSessions.find((s) => s.id === id);
+      if (!session) return null;
+      session.contextText = "";
+      session.updatedAt = Date.now();
+      return session;
+    },
+    sessionDelete: async (id: string) => {
+      const idx = mockSessions.findIndex((s) => s.id === id);
+      if (idx >= 0) mockSessions.splice(idx, 1);
+      if (mockActiveSessionId === id) mockActiveSessionId = null;
+      return idx >= 0;
+    },
+    sessionSetActive: async (id: string | null) => {
+      if (id === null) {
+        mockActiveSessionId = null;
+        return null;
+      }
+      const session = mockSessions.find((s) => s.id === id);
+      if (!session) return null;
+      mockActiveSessionId = id;
+      return session;
+    },
+    sessionGetActive: async () => mockSessions.find((s) => s.id === mockActiveSessionId) ?? null,
+    projectContextGet: async () => mockProjectContext,
+    projectContextSet: async (text: string) => {
+      mockProjectContext = clampContextText(text, PROJECT_CONTEXT_MAX_CHARS);
+      return true;
+    },
+    projectList: async () => ({
+      projects: [...mockProjects].sort((a, b) => b.updatedAt - a.updatedAt),
+      activeProjectId: mockActiveProjectId,
+    }),
+    projectUpsertActive: async (text: string) => {
+      const clamped = clampContextText(text, PROJECT_CONTEXT_MAX_CHARS);
+      const now = Date.now();
+      let project = mockActiveProjectId
+        ? mockProjects.find((p) => p.id === mockActiveProjectId)
+        : undefined;
+      if (project) {
+        project.contextText = clamped;
+        project.title = deriveProjectTitle(project.contextText, project.createdAt);
+        project.updatedAt = now;
+      } else {
+        project = {
+          id: `mock-proj-${now}-${mockProjects.length}`,
+          title: deriveProjectTitle(clamped, now),
+          contextText: clamped,
+          createdAt: now,
+          updatedAt: now,
+        };
+        mockProjects.push(project);
+        mockActiveProjectId = project.id;
+      }
+      mockProjectContext = clamped;
+      mockEvictProjects();
+      return project;
+    },
+    projectSetActive: async (id: string | null) => {
+      if (id === null) {
+        mockActiveProjectId = null;
+        mockProjectContext = "";
+        return null;
+      }
+      const project = mockProjects.find((p) => p.id === id);
+      if (!project) return null;
+      mockActiveProjectId = id;
+      project.updatedAt = Date.now();
+      mockProjectContext = project.contextText;
+      return project;
+    },
+    projectDelete: async (id: string) => {
+      const idx = mockProjects.findIndex((p) => p.id === id);
+      if (idx < 0) return false;
+      mockProjects.splice(idx, 1);
+      for (let i = mockSessions.length - 1; i >= 0; i--) {
+        if (mockSessions[i].projectId === id) {
+          if (mockActiveSessionId === mockSessions[i].id) mockActiveSessionId = null;
+          mockSessions.splice(i, 1);
+        }
+      }
+      if (mockActiveProjectId === id) {
+        mockActiveProjectId = null;
+        mockProjectContext = "";
+      }
+      return true;
+    },
 
     openStudio: () => {
       window.location.hash = "#/studio";

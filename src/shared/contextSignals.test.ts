@@ -3,6 +3,10 @@ import {
   detectSite,
   suggestTargetModel,
   isLikelyFileName,
+  isExcludedContextFileName,
+  hasSourceFileExtension,
+  shouldAttachFileContext,
+  sanitizeEditorWindowTitle,
   extractFileFromEditorTitle,
   editorKindFromProcess,
   relevantFileMemory,
@@ -100,6 +104,53 @@ describe("isLikelyFileName", () => {
     expect(isLikelyFileName("what?.ts")).toBe(false);
     expect(isLikelyFileName("a".repeat(80) + ".ts")).toBe(false);
   });
+
+  it("rejects workspace names and non-source extensions", () => {
+    expect(isLikelyFileName("Anvyl.ai")).toBe(false);
+    expect(isLikelyFileName("foo.bar")).toBe(false);
+    expect(isLikelyFileName("project.xyz")).toBe(false);
+  });
+});
+
+describe("hasSourceFileExtension", () => {
+  it("accepts known source extensions and rejects others", () => {
+    expect(hasSourceFileExtension("storage.ts")).toBe(true);
+    expect(hasSourceFileExtension("main.py")).toBe(true);
+    expect(hasSourceFileExtension("Anvyl.ai")).toBe(false);
+    expect(hasSourceFileExtension("notes.md")).toBe(false);
+    expect(hasSourceFileExtension("noext")).toBe(false);
+  });
+});
+
+describe("shouldAttachFileContext", () => {
+  it("only code-editor and ai-chat carry file context", () => {
+    expect(shouldAttachFileContext("code-editor")).toBe(true);
+    expect(shouldAttachFileContext("ai-chat")).toBe(true);
+    expect(shouldAttachFileContext("terminal")).toBe(false);
+    expect(shouldAttachFileContext("email")).toBe(false);
+    expect(shouldAttachFileContext("chat")).toBe(false);
+    expect(shouldAttachFileContext("docs-notes")).toBe(false);
+    expect(shouldAttachFileContext("other")).toBe(false);
+    expect(shouldAttachFileContext(undefined)).toBe(false);
+  });
+});
+
+describe("isExcludedContextFileName", () => {
+  it("rejects Cursor agent plan tabs", () => {
+    expect(isExcludedContextFileName("terminal_classify_fix_8b45ccc5.plan.md")).toBe(true);
+    expect(isExcludedContextFileName("fable5.agent.plan.md")).toBe(true);
+  });
+
+  it("rejects markdown docs and status notes", () => {
+    expect(isExcludedContextFileName("cursor_context_awareness_project_status.md")).toBe(true);
+    expect(isExcludedContextFileName("the-context-layer-what-glistening-hare.md")).toBe(true);
+    expect(isExcludedContextFileName("README.md")).toBe(true);
+  });
+
+  it("allows normal source files", () => {
+    expect(isExcludedContextFileName("storage.ts")).toBe(false);
+    expect(isExcludedContextFileName("Overlay.test.tsx")).toBe(false);
+  });
 });
 
 describe("extractFileFromEditorTitle", () => {
@@ -112,6 +163,45 @@ describe("extractFileFromEditorTitle", () => {
     expect(extractFileFromEditorTitle("storage.ts - x - Cursor", "chrome")).toBeNull();
     expect(extractFileFromEditorTitle("Welcome - Cursor", "cursor")).toBeNull();
     expect(extractFileFromEditorTitle("", "cursor")).toBeNull();
+  });
+
+  it("ignores Cursor agent plan tabs", () => {
+    expect(
+      extractFileFromEditorTitle(
+        "terminal_classify_fix_8b45ccc5.plan.md - prompt-master - Cursor",
+        "cursor",
+      ),
+    ).toBeNull();
+  });
+
+  it("ignores workspace names that are not source files", () => {
+    expect(extractFileFromEditorTitle("Anvyl.ai - Cursor", "cursor")).toBeNull();
+  });
+});
+
+describe("sanitizeEditorWindowTitle", () => {
+  it("strips agent plan filenames from editor titles", () => {
+    expect(
+      sanitizeEditorWindowTitle(
+        "terminal_classify_fix_8b45ccc5.plan.md - prompt-master - Cursor",
+        "cursor",
+      ),
+    ).toBe("prompt-master - Cursor");
+  });
+
+  it("strips markdown plan/doc filenames from editor titles", () => {
+    expect(
+      sanitizeEditorWindowTitle(
+        "the-context-layer-what-glistening-hare.md - prompt-master - Cursor",
+        "cursor",
+      ),
+    ).toBe("prompt-master - Cursor");
+  });
+
+  it("leaves normal source file titles intact", () => {
+    expect(sanitizeEditorWindowTitle("storage.ts - prompt-master - Cursor", "cursor")).toBe(
+      "storage.ts - prompt-master - Cursor",
+    );
   });
 });
 
@@ -136,6 +226,20 @@ describe("relevantFileMemory", () => {
 
   it("matches exact file-name tokens", () => {
     expect(relevantFileMemory("fix overlay.tsx please", memory)).toContain("Overlay.tsx");
+  });
+
+  it("skips markdown docs in memory", () => {
+    const memory = [
+      "storage.ts",
+      "cursor_context_awareness_project_status.md",
+      "the-context-layer-what-glistening-hare.md",
+    ];
+    expect(relevantFileMemory("update storage.ts", memory)).toEqual(["storage.ts"]);
+  });
+
+  it("skips agent plan files in memory", () => {
+    const memory = ["storage.ts", "terminal_classify_fix_8b45ccc5.plan.md"];
+    expect(relevantFileMemory("update storage.ts", memory)).toEqual(["storage.ts"]);
   });
 
   it("caps output and dedupes the active file", () => {
@@ -167,6 +271,15 @@ describe("buildDestinationContextBlock", () => {
     expect(block).toContain("- Text scope: whole draft");
     expect(block).toContain("storage.ts, contextLayer.ts");
     expect(block).not.toContain("claude-opus-4.8"); // suggestedModel never rendered
+  });
+
+  it("includes scope-discipline and file-vs-title rules", () => {
+    const block = buildDestinationContextBlock({
+      app: { processName: "cursor", editorKind: "cursor", windowTitle: "Anvyl.ai - Cursor" },
+      text: { scope: "field", hasSelection: false },
+    });
+    expect(block).toContain('Treat only the names under "Known project file names" as files');
+    expect(block).toContain("Stay within the scope the draft and destination imply");
   });
 
   it("labels editors and renders before/after cursor with caps", () => {
@@ -217,30 +330,16 @@ describe("buildDestinationContextBlock", () => {
     const block = buildDestinationContextBlock({
       app: { processName: "WindowsTerminal", hostKind: "terminal", category: "terminal" },
       text: { scope: "field", hasSelection: false },
-      styleHint: resolveStyleDirective({ category: "terminal", enabled: true }),
     });
     expect(block).not.toMatch(/output format|markdown|xml/i);
   });
 
-  it("renders the category and style lines", () => {
+  it("renders the category line without a style directive", () => {
     const block = buildDestinationContextBlock({
       app: { processName: "chrome", site: "mail.google.com", category: "email" },
-      styleHint: "Professional, courteous tone suited to email.",
     });
     expect(block).toContain("- Destination category: Email");
-    expect(block).toContain("- Style for this destination: Professional, courteous tone suited to email.");
-  });
-
-  it("renders the block for a styleHint-only context", () => {
-    const block = buildDestinationContextBlock({ styleHint: "Casual, conversational tone." });
-    expect(block).toContain("DESTINATION CONTEXT");
-    expect(block).toContain("- Style for this destination: Casual, conversational tone.");
-  });
-
-  it("caps an oversized styleHint", () => {
-    const block = buildDestinationContextBlock({ styleHint: "z".repeat(1000) });
-    const hint = block.match(/- Style for this destination: (z+)/)?.[1] ?? "";
-    expect(hint.length).toBe(CONTEXT_CAPS.styleHint);
+    expect(block).not.toContain("Style for this destination");
   });
 
   it("renders no category line for the 'other' category", () => {

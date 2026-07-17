@@ -534,7 +534,9 @@ if ($isTerminal) {
         if (Test-IsTextControl $el) {
           $lastEl = $el
           $text = Get-ElementText $el
-          if (-not [string]::IsNullOrEmpty($text) -and (Test-IsTerminalBufferDump $text -or $isNativeTerminal)) {
+          # Native terminal only — never flip isTerminal from dump markers on a text control
+          # (composer/monaco/etc. can contain multi-line drafts or pasted PS banners).
+          if (-not [string]::IsNullOrEmpty($text) -and $isNativeTerminal) {
             if (Write-CaptureTextPath $text $TextPath) {
               $isTerminal = $true
               $uiaStatus = "ok"

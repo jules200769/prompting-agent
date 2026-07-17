@@ -4,18 +4,26 @@
 
 import type { CaptureContext, CaptureMode } from "../shared/types";
 import { CONTEXT_CAPS } from "../shared/types";
+import { stripUiPrivateUseGlyphs } from "../shared/captureTextSanitize";
 import {
   detectAppCategory,
   detectSite,
   editorKindFromProcess,
   extractFileFromEditorTitle,
+  sanitizeEditorWindowTitle,
   relevantFileMemory,
-  resolveStyleDirective,
+  shouldAttachFileContext,
   suggestTargetModel,
 } from "../shared/contextSignals";
 import type { HostKind } from "../shared/injectStrategy";
 import type { UiaTargetMeta } from "./capture";
 import { getSettings, listFileMemory, recordFileMemory } from "./storage";
+
+function cleanCaptureField(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const cleaned = stripUiPrivateUseGlyphs(text).trim();
+  return cleaned || undefined;
+}
 
 /** Selection-structure sidecar written by win-hotkey-snapshot.ps1 (-ContextPath). */
 export interface ContextSidecarSignals {
@@ -60,7 +68,10 @@ export function assembleCaptureContext(opts: {
   if (opts.snapshot.isPassword) return undefined;
 
   const processName = opts.snapshot.process;
-  const windowTitle = capHead(opts.snapshot.windowTitle?.trim() || undefined, CONTEXT_CAPS.windowTitle);
+  const windowTitle = capHead(
+    sanitizeEditorWindowTitle(opts.snapshot.windowTitle, processName),
+    CONTEXT_CAPS.windowTitle,
+  );
   const site = detectSite({ processName, windowTitle, url: opts.snapshot.siteUrl }) ?? undefined;
   const editorKind = editorKindFromProcess(processName);
   const category = detectAppCategory({
@@ -94,15 +105,23 @@ export function assembleCaptureContext(opts: {
     ctx.text = {
       scope: hasSelection ? "selection" : "field",
       hasSelection,
-      selectedText: capHead(sidecar?.selectedText || undefined, CONTEXT_CAPS.selectedText),
-      beforeCursor: capTail(sidecar?.beforeCursor || undefined, CONTEXT_CAPS.beforeCursor),
-      afterCursor: capHead(sidecar?.afterCursor || undefined, CONTEXT_CAPS.afterCursor),
+      selectedText: capHead(cleanCaptureField(sidecar?.selectedText), CONTEXT_CAPS.selectedText),
+      beforeCursor: capTail(cleanCaptureField(sidecar?.beforeCursor), CONTEXT_CAPS.beforeCursor),
+      afterCursor: capHead(cleanCaptureField(sidecar?.afterCursor), CONTEXT_CAPS.afterCursor),
     };
   }
 
-  if (editorKind) {
-    const activeFile = extractFileFromEditorTitle(windowTitle, processName) ?? undefined;
-    const matched = relevantFileMemory(opts.capturedText, listFileMemory(), activeFile, CONTEXT_CAPS.files);
+  // File context is category-scoped: code editors expose the open file via the
+  // window title; AI-chat panes (Cursor chat) carry a workspace name, not a
+  // file, so activeFile is skipped there and only prompt-token memory matches
+  // surface. Terminals, email, chat, docs, and unknown apps get no files.
+  if (shouldAttachFileContext(category)) {
+    const activeFile =
+      category === "code-editor"
+        ? (extractFileFromEditorTitle(windowTitle, processName) ?? undefined)
+        : undefined;
+    const cleanedCaptured = stripUiPrivateUseGlyphs(opts.capturedText);
+    const matched = relevantFileMemory(cleanedCaptured, listFileMemory(), activeFile, CONTEXT_CAPS.files);
     const recentFiles = matched.filter((f) => f.toLowerCase() !== activeFile?.toLowerCase());
     if (activeFile || recentFiles.length > 0) {
       ctx.files = { activeFile, recentFiles: recentFiles.length > 0 ? recentFiles : undefined };
@@ -114,13 +133,6 @@ export function assembleCaptureContext(opts: {
     processName,
     elementClassName: opts.uia?.className,
   });
-
-  const styleHint = resolveStyleDirective({
-    category,
-    enabled: settings.styleMatching,
-    preset: settings.styleByCategory?.[category] ?? "auto",
-  });
-  if (styleHint) ctx.styleHint = capHead(styleHint, CONTEXT_CAPS.styleHint);
 
   return ctx;
 }

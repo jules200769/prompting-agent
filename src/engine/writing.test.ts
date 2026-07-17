@@ -101,6 +101,7 @@ describe("buildWritingMetaPrompt", () => {
   it("includes standing context when provided", () => {
     const { system } = build("email", 2, { context: "Works at Anvyl, Dutch B2B market" });
     expect(system).toContain("Works at Anvyl, Dutch B2B market");
+    expect(system).toContain("does not override type/level rules");
     expect(build("email", 2).system).not.toContain("Standing context");
   });
 
@@ -112,6 +113,7 @@ describe("buildWritingMetaPrompt", () => {
       },
     });
     expect(system).toContain("Destination app: slack");
+    expect(system).toContain("sparse or rich context never overrides the writing-type or level rules above");
   });
 
   it("threads the selected passage through into the system prompt", () => {
@@ -139,5 +141,19 @@ describe("writingToneLabel", () => {
         expect(writingToneLabel(type, level)).toBe(WRITING_LEVEL_LABELS[type][level]);
       }
     }
+  });
+});
+
+describe("buildWritingMetaPrompt session/project context", () => {
+  it("renders the SESSION CONTEXT block in writing mode too", () => {
+    const { system } = build("email", 2, { sessionContext: "recipient is my manager Sam" });
+    expect(system).toContain("SESSION CONTEXT");
+    expect(system).toContain("recipient is my manager Sam");
+  });
+
+  it("omits the block when neither is set", () => {
+    const { system } = build("email", 2);
+    expect(system).not.toContain("SESSION CONTEXT");
+    expect(system).not.toContain("PROJECT CONTEXT");
   });
 });

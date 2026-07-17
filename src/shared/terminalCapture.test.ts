@@ -81,6 +81,15 @@ describe("resolveCaptureFromPossibleTerminal", () => {
 Copyright (C) Microsoft Corporation. All rights reserved.
 PS C:\\Users\\julez> mijn prompt hier`;
 
+  const longMultiLineDraft = [
+    "make a plan: context. new session is new context.",
+    "the context of the sessions must be saved to be able to",
+    "continue a session. you also need to implement the context",
+    "backend when you insert the context prompt. we need perfect",
+    "context awareness in this app and the sessions should be",
+    "implemented right.",
+  ].join("\n");
+
   it("extracts from buffer even when snapshot missed terminal flag (field-path fallback)", () => {
     const res = resolveCaptureFromPossibleTerminal(buffer, {
       className: "ConsoleWindowClass",
@@ -103,6 +112,66 @@ PS C:\\Users\\julez> mijn prompt hier`;
       process: "chrome",
     });
     expect(res).toEqual({ text: "hello from a text field", mode: "field", terminalContext: false });
+  });
+
+  it("does not flip Cursor composer multi-line drafts to terminal", () => {
+    expect(isLikelyFullConsoleBuffer(longMultiLineDraft)).toBe(true);
+    const res = resolveCaptureFromPossibleTerminal(longMultiLineDraft, {
+      className: "Chrome_WidgetWin_1",
+      process: "Cursor",
+      focusedIsTerminalPane: false,
+      elementClassName: "aislash-editor-input",
+    });
+    expect(res).toEqual({
+      text: longMultiLineDraft,
+      mode: "field",
+      terminalContext: false,
+    });
+  });
+
+  it("does not flip monaco / ProseMirror / textarea multi-line drafts to terminal", () => {
+    for (const elementClassName of ["monaco-editor", "ProseMirror", "textarea"]) {
+      const res = resolveCaptureFromPossibleTerminal(longMultiLineDraft, {
+        className: "Chrome_WidgetWin_1",
+        process: "chrome",
+        focusedIsTerminalPane: false,
+        elementClassName,
+      });
+      expect(res.mode).toBe("field");
+      expect(res.terminalContext).toBe(false);
+      expect(res.text).toBe(longMultiLineDraft);
+    }
+  });
+
+  it("keeps integrated terminal pane as terminal even for long multi-line text", () => {
+    const res = resolveCaptureFromPossibleTerminal(longMultiLineDraft, {
+      className: "Chrome_WidgetWin_1",
+      process: "Cursor",
+      focusedIsTerminalPane: true,
+    });
+    expect(res.mode).toBe("terminal");
+    expect(res.terminalContext).toBe(true);
+    expect(res.text).toBe(longMultiLineDraft);
+  });
+
+  it("does not flip PowerShell banner paste inside a known non-terminal control", () => {
+    const res = resolveCaptureFromPossibleTerminal(buffer, {
+      className: "Chrome_WidgetWin_1",
+      process: "Cursor",
+      focusedIsTerminalPane: false,
+      elementClassName: "aislash-editor-input",
+    });
+    expect(res).toEqual({ text: buffer, mode: "field", terminalContext: false });
+  });
+
+  it("treats explicit non-pane Chrome field as field without element class", () => {
+    const res = resolveCaptureFromPossibleTerminal(longMultiLineDraft, {
+      className: "Chrome_WidgetWin_1",
+      process: "chrome",
+      focusedIsTerminalPane: false,
+    });
+    expect(res.mode).toBe("field");
+    expect(res.terminalContext).toBe(false);
   });
 
   it("filters accessibility noise even in terminal context", () => {

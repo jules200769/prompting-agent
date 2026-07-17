@@ -97,6 +97,25 @@ export function isTerminalCaptureContext(
   return false;
 }
 
+/**
+ * Focused UIA identity that must never be flipped to terminal by text-shape heuristics.
+ * Aligns with inject rich-editor patterns + PS Test-IsTextControl class hints.
+ * Does not treat bare ControlType.Document as a field (terminal panes are often Document).
+ */
+const KNOWN_NON_TERMINAL_CLASS_RE =
+  /aislash|monaco|ProseMirror|contenteditable|CodeMirror|ace_editor|inputarea|editor|input|textarea|Omnibox|RichEdit/i;
+
+export function isKnownNonTerminalControl(opts: {
+  elementClassName?: string;
+  automationId?: string;
+}): boolean {
+  const cls = (opts.elementClassName ?? "").trim();
+  if (cls && KNOWN_NON_TERMINAL_CLASS_RE.test(cls)) return true;
+  const aid = (opts.automationId ?? "").trim();
+  if (aid && KNOWN_NON_TERMINAL_CLASS_RE.test(aid)) return true;
+  return false;
+}
+
 function normalizeProcessName(processName: string | undefined): string {
   return (processName ?? "").trim().toLowerCase().replace(/\.exe$/, "");
 }

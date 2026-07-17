@@ -5,6 +5,7 @@
 import type { CaptureContext, OptLevel, WritingType } from "../shared/types";
 import { WRITING_LEVEL_LABELS } from "../shared/types";
 import { buildDestinationContextBlock } from "../shared/contextSignals";
+import { buildSessionContextBlock } from "../shared/session";
 
 export interface WritingParams {
   prompt: string;
@@ -14,6 +15,10 @@ export interface WritingParams {
   context?: string;
   /** Destination context from hotkey capture. */
   captureContext?: CaptureContext;
+  /** Active-session context (resolved main-side). */
+  sessionContext?: string;
+  /** Standing project context (resolved main-side). */
+  projectContext?: string;
   /** Shell paste: force single-line plain output. */
   terminalContext?: boolean;
 }
@@ -139,20 +144,22 @@ TERMINAL SHELL (mandatory — overrides any structure rules above):
     : "";
 
   const contextLine = params.context?.trim()
-    ? `\nStanding context about the user to draw on where relevant (never quote it verbatim): ${params.context.trim()}\n`
+    ? `\nStanding context to draw on where relevant (never quote it verbatim; does not override type/level rules): ${params.context.trim()}\n`
     : "";
 
   const destinationContextBlock = buildDestinationContextBlock(params.captureContext);
+  const sessionBlock = buildSessionContextBlock(params.sessionContext, params.projectContext);
 
   const system = `You are an expert writer and editor. Rewrite the user's draft as ${deliverable}. The result is the final text the user will send or use directly — it is NOT a prompt for an AI and NOT advice about the draft.
 
 ${TYPE_RULES[type]}
 
 ${LEVEL_RULES[type][params.level]}
-${terminalRule}${destinationContextBlock}${contextLine}
+${terminalRule}${destinationContextBlock}${sessionBlock}${contextLine}
 OUTPUT RULES (strict):
 - Write in the same language as the user's draft
 - Preserve the user's intent and every stated fact; never invent details about their situation
+- Destination and standing context are grounding only — sparse or rich context never overrides the writing-type or level rules above
 - Return ONLY the finished text as plain ${params.terminalContext ? "single-line " : ""}text
 - No markdown fences, no commentary, no options, no preamble like "Here is..."
 - The output must be ready to send as-is (target: ${toneLabel})`;

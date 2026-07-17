@@ -254,7 +254,33 @@ export function resolveStyleDirective(opts: {
   return `${tone} ${directive.format}`;
 }
 
-/** Wispr rule: contains a dot, no whitespace, starts with a letter, ≤80 chars, no path chars. */
+/**
+ * Known source-file extensions. Only names ending in one of these count as a
+ * file for context — keeps workspace names (Anvyl.ai) and vague dotted tokens
+ * (foo.bar) out. Markdown is intentionally absent (handled by
+ * isExcludedContextFileName so plans/docs never reach file context).
+ */
+export const SOURCE_FILE_EXTENSIONS = new Set([
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
+  "py", "rs", "go", "java", "cs", "cpp", "cc", "c", "h", "hpp",
+  "rb", "php", "swift", "kt", "kts", "scala", "sql",
+  "vue", "svelte", "css", "scss", "sass", "less", "html",
+  "ps1", "psm1", "sh", "bash", "zsh",
+  "json", "jsonc", "yaml", "yml", "toml", "xml", "ini", "env",
+]);
+
+/** Whether the last dot-segment of a name is a recognized source extension. */
+export function hasSourceFileExtension(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  if (dot < 0 || dot === name.length - 1) return false;
+  return SOURCE_FILE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
+/**
+ * Wispr rule tightened with a source-extension whitelist: contains a dot, no
+ * whitespace, starts with a letter, ≤80 chars, no path chars, and ends in a
+ * known source extension (so "Anvyl.ai" / "foo.bar" are rejected).
+ */
 export function isLikelyFileName(token: string): boolean {
   const t = token.trim();
   if (!t || t.length > 80) return false;
@@ -262,7 +288,20 @@ export function isLikelyFileName(token: string): boolean {
   if (/\s/.test(t)) return false;
   if (!/^[a-zA-Z]/.test(t)) return false;
   if (/[\\/:*?"<>|]/.test(t)) return false;
+  if (!hasSourceFileExtension(t)) return false;
   return true;
+}
+
+/**
+ * Editor titles that look like files but must not feed DESTINATION CONTEXT or
+ * file memory — e.g. Cursor agent plans, status docs, and other markdown notes
+ * opened while vibe-coding.
+ */
+export function isExcludedContextFileName(name: string): boolean {
+  const lower = name.trim().toLowerCase();
+  if (lower.endsWith(".plan.md")) return true;
+  if (lower.endsWith(".md")) return true;
+  return false;
 }
 
 export function editorKindFromProcess(
@@ -273,6 +312,25 @@ export function editorKindFromProcess(
   if (proc === "code" || proc === "code - insiders") return "vscode";
   if (proc === "windsurf") return "windsurf";
   return undefined;
+}
+
+/**
+ * When a Cursor/VS Code tab is an agent plan, drop the filename segment from
+ * the window title so DESTINATION CONTEXT does not mention it.
+ */
+export function sanitizeEditorWindowTitle(
+  title: string | undefined,
+  processName: string | undefined,
+): string | undefined {
+  if (!editorKindFromProcess(processName)) return title?.trim() || undefined;
+  const cleaned = (title ?? "").replace(/[●○]/g, "").trim();
+  if (!cleaned) return undefined;
+  const parts = cleaned.split(" - ").map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return undefined;
+  if (isExcludedContextFileName(parts[0]!)) {
+    return parts.length > 1 ? parts.slice(1).join(" - ") : undefined;
+  }
+  return cleaned;
 }
 
 /**
@@ -287,7 +345,17 @@ export function extractFileFromEditorTitle(
   const cleaned = (title ?? "").replace(/[●○]/g, "").trim();
   if (!cleaned) return null;
   const first = cleaned.split(" - ")[0].trim();
-  return isLikelyFileName(first) ? first : null;
+  if (!isLikelyFileName(first) || isExcludedContextFileName(first)) return null;
+  return first;
+}
+
+/**
+ * Whether file context (activeFile / recentFiles) is meaningful for a
+ * destination category. Only code editors and AI-chat panes reference project
+ * files; terminals, email, chat, docs, and unknown apps never should.
+ */
+export function shouldAttachFileContext(category: AppCategory | undefined): boolean {
+  return category === "code-editor" || category === "ai-chat";
 }
 
 function fileMatchesPrompt(name: string, promptTokens: Set<string>): boolean {
@@ -316,6 +384,7 @@ export function relevantFileMemory(
   const out: string[] = [];
   const seen = new Set<string>();
   const push = (name: string) => {
+    if (isExcludedContextFileName(name)) return;
     const key = name.toLowerCase();
     if (!seen.has(key) && out.length < max) {
       seen.add(key);
@@ -369,9 +438,6 @@ export function buildDestinationContextBlock(ctx: CaptureContext | undefined): s
   if (app?.category && app.category !== "other") {
     lines.push(`- Destination category: ${APP_CATEGORY_LABELS[app.category]}`);
   }
-  if (ctx.styleHint?.trim()) {
-    lines.push(`- Style for this destination: ${cap(ctx.styleHint.trim(), CONTEXT_CAPS.styleHint)}`);
-  }
 
   const text = ctx.text;
   if (text) {
@@ -420,11 +486,15 @@ export function buildDestinationContextBlock(ctx: CaptureContext | undefined): s
   if (lines.length === 0) return "";
 
   return `
-DESTINATION CONTEXT (where the user will paste the refined prompt — adapt fit, do not override intent):
+DESTINATION CONTEXT (grounding only — fold into the mandatory rules already stated above; never change output shape):
 ${lines.join("\n")}
 Rules for this context:
-- Use it only to match tone, formatting conventions, and exact file-name spelling for the destination
+- Fold relevant grounding into the refined output using the mandatory rules already stated above — sparse or rich context never relaxes, replaces, or skips those rules
+- Use it only to match tone, destination conventions, and exact file-name spelling
+- Treat only the names under "Known project file names" as files; the window title may name a workspace or app, not an open file
+- Stay within the scope the draft and destination imply — do not introduce other apps, tools, or integrations the draft never mentions
 - Do not add facts, goals, or constraints the user's prompt does not imply
-- The refined prompt is FOR the AI behind the destination — never address the destination app itself
+- Never flatten or rewrite around this block: selected model/level (or writing type/level) parameters always win
+- The refined output is FOR the destination — never address the destination app itself
 `;
 }

@@ -584,6 +584,25 @@ function registerIpc(): void {
   ipcMain.handle(IPC.HISTORY_LIST, () => store.listHistory());
   ipcMain.handle(IPC.HISTORY_CLEAR, () => { store.clearHistory(); return true; });
 
+  ipcMain.handle(IPC.SESSION_LIST, () => store.listSessions());
+  ipcMain.handle(IPC.SESSION_CREATE, (_evt, projectId?: string | null) =>
+    store.createSession(projectId ?? null),
+  );
+  ipcMain.handle(IPC.SESSION_SET_CONTEXT, (_evt, id: string, text: string) => store.setSessionContext(id, text));
+  ipcMain.handle(IPC.SESSION_CLEAR, (_evt, id: string) => store.clearSessionContext(id));
+  ipcMain.handle(IPC.SESSION_DELETE, (_evt, id: string) => { store.deleteSession(id); return true; });
+  ipcMain.handle(IPC.SESSION_SET_ACTIVE, (_evt, id: string | null) => store.setActiveSession(id));
+  ipcMain.handle(IPC.SESSION_GET_ACTIVE, () => store.getActiveSession());
+  ipcMain.handle(IPC.PROJECT_CONTEXT_GET, () => store.getProjectContext());
+  ipcMain.handle(IPC.PROJECT_CONTEXT_SET, (_evt, text: string) => { store.setProjectContext(text); return true; });
+  ipcMain.handle(IPC.PROJECT_LIST, () => ({
+    projects: store.listProjects(),
+    activeProjectId: store.getActiveProjectId(),
+  }));
+  ipcMain.handle(IPC.PROJECT_UPSERT_ACTIVE, (_evt, text: string) => store.upsertActiveProject(text));
+  ipcMain.handle(IPC.PROJECT_SET_ACTIVE, (_evt, id: string | null) => store.setActiveProject(id));
+  ipcMain.handle(IPC.PROJECT_DELETE, (_evt, id: string) => { store.deleteProject(id); return true; });
+
   ipcMain.on(IPC.OVERLAY_HIDE, () => {
     void hideOverlay();
   });

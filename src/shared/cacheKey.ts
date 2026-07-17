@@ -2,6 +2,7 @@
 // so the key composition is unit-testable.
 
 import type { CaptureContext } from "./types";
+import { REWRITE_CONFIG } from "./types";
 
 export interface CacheKeyRequest {
   prompt: string;
@@ -13,6 +14,8 @@ export interface CacheKeyRequest {
   promptType?: string;
   writingType?: string;
   captureContext?: CaptureContext;
+  sessionContext?: string;
+  projectContext?: string;
 }
 
 /** FNV-1a 32-bit hash (hex) — compact fingerprint for the context string. */
@@ -43,7 +46,6 @@ export function canonicalContextString(ctx: CaptureContext | undefined): string 
     ctx.files?.activeFile ?? "",
     (ctx.files?.recentFiles ?? []).join(","),
     ctx.app?.category ?? "",
-    ctx.styleHint ?? "",
   ];
   // All-empty context contributes nothing (same key as no context).
   if (fields.every((f) => f === "")) return "";
@@ -56,5 +58,10 @@ export function buildCacheKey(version: number, req: CacheKeyRequest): string {
   const writing = req.writingType ? `|writing:${req.writingType}` : "";
   const canonical = canonicalContextString(req.captureContext);
   const ctx = canonical ? `|ctx:${fnv1a(canonical)}` : "";
-  return `v${version}|${req.model}|${req.level}|${req.persona ?? ""}|${req.context ?? ""}${term}${type}${writing}${ctx}|${req.prompt.trim().toLowerCase()}`;
+  // Session/project context are hashed (up to 4000 chars each) — empty/absent
+  // contributes nothing so pre-session cache keys stay byte-identical.
+  const sess = req.sessionContext?.trim() ? `|sess:${fnv1a(req.sessionContext.trim())}` : "";
+  const proj = req.projectContext?.trim() ? `|proj:${fnv1a(req.projectContext.trim())}` : "";
+  const rewriteModel = REWRITE_CONFIG.modelId;
+  return `v${version}|rw:${rewriteModel}|${req.model}|${req.level}|${req.persona ?? ""}|${req.context ?? ""}${term}${type}${writing}${ctx}${sess}${proj}|${req.prompt.trim().toLowerCase()}`;
 }

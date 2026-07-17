@@ -4,6 +4,7 @@ import {
   isTerminalAccessibilityNoise,
   isIdeWindowTitleNoise,
   isCaptureNoiseText,
+  isKnownNonTerminalControl,
   isTerminalCaptureContext,
   isTerminalPaneHint,
   isTerminalWindow,
@@ -115,5 +116,19 @@ describe("isTerminalCaptureContext", () => {
 
   it("does not treat Cursor editor as terminal", () => {
     expect(isTerminalCaptureContext("Chrome_WidgetWin_1", "Cursor", false)).toBe(false);
+  });
+});
+
+describe("isKnownNonTerminalControl", () => {
+  it("recognizes Cursor composer and rich editors", () => {
+    expect(isKnownNonTerminalControl({ elementClassName: "aislash-editor-input" })).toBe(true);
+    expect(isKnownNonTerminalControl({ elementClassName: "monaco-editor" })).toBe(true);
+    expect(isKnownNonTerminalControl({ elementClassName: "ProseMirror" })).toBe(true);
+    expect(isKnownNonTerminalControl({ elementClassName: "textarea" })).toBe(true);
+  });
+
+  it("returns false for unknown or terminal-like elements", () => {
+    expect(isKnownNonTerminalControl({})).toBe(false);
+    expect(isKnownNonTerminalControl({ elementClassName: "xterm-rows" })).toBe(false);
   });
 });

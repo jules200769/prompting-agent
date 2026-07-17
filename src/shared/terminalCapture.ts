@@ -1,5 +1,9 @@
 import type { CaptureMode } from "./types";
-import { isTerminalCaptureContext, isCaptureNoiseText } from "./terminalDetect";
+import {
+  isCaptureNoiseText,
+  isKnownNonTerminalControl,
+  isTerminalCaptureContext,
+} from "./terminalDetect";
 
 /** Pure helper mirroring terminal capture mode resolution in capture.ts. */
 export function resolveTerminalCaptureMode(selectionText: string | null | undefined): CaptureMode {
@@ -19,6 +23,10 @@ export interface TerminalSnapshotContext {
   process?: string;
   focusedIsTerminalPane?: boolean;
   terminalBounds?: TerminalBounds;
+  /** Focused UIA element class (field path) — blocks text-heuristic terminal flips. */
+  elementClassName?: string;
+  automationId?: string;
+  controlType?: string;
 }
 
 export interface TerminalCaptureResolution {
@@ -140,16 +148,38 @@ export function extractTerminalInput(text: string): string | null {
   return joined;
 }
 
+/**
+ * Text-shape heuristics are a missed-terminal fallback only.
+ * Never override a known non-terminal control or an explicit non-pane UIA result.
+ */
+function textHeuristicsMayForceTerminal(ctx?: TerminalSnapshotContext): boolean {
+  if (
+    isKnownNonTerminalControl({
+      elementClassName: ctx?.elementClassName,
+      automationId: ctx?.automationId,
+    })
+  ) {
+    return false;
+  }
+  // PS/UIA already confirmed this is not an integrated terminal pane.
+  if (ctx?.focusedIsTerminalPane === false) return false;
+  return true;
+}
+
 /** Normalize raw capture text into terminal or field mode (used on every capture path). */
 export function resolveCaptureFromPossibleTerminal(
   raw: string,
   ctx?: TerminalSnapshotContext,
 ): TerminalCaptureResolution {
   const trimmed = raw.trim();
+  const uiaTerminal = isTerminalCaptureContext(
+    ctx?.className,
+    ctx?.process,
+    ctx?.focusedIsTerminalPane,
+  );
+  const textLooksTerminal = isTerminalBufferDump(trimmed) || isLikelyFullConsoleBuffer(trimmed);
   const terminalContext =
-    isTerminalCaptureContext(ctx?.className, ctx?.process, ctx?.focusedIsTerminalPane) ||
-    isTerminalBufferDump(trimmed) ||
-    isLikelyFullConsoleBuffer(trimmed);
+    uiaTerminal || (textLooksTerminal && textHeuristicsMayForceTerminal(ctx));
 
   if (!trimmed || isCaptureNoiseText(trimmed)) {
     return { text: "", mode: "empty", terminalContext };

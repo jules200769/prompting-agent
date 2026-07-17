@@ -12,7 +12,11 @@ import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
 import type { CaptureContext, CaptureMode, ModelId, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
 import { MODELS, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
 import { toTerminalSingleLine, stripTerminalStreamChunk } from "../../shared/terminalOutput";
-import { CONTEXT_IMPORT_PROMPT } from "../../shared/contextImportPrompt";
+import {
+  type ContextImportScope,
+  contextImportPromptFor,
+} from "../../shared/contextImportPrompt";
+import { SESSION_CONTEXT_MAX_CHARS, type ProjectContext, type SessionContext } from "../../shared/session";
 import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
 import { ModelPicker } from "../components/ModelPicker";
 import { WritingTypePicker, type WritingType, writingLevelLabels } from "../components/WritingTypePicker";
@@ -25,6 +29,21 @@ function MoreIcon() {
       <circle cx="12" cy="5" r="2" fill="currentColor" />
       <circle cx="12" cy="12" r="2" fill="currentColor" />
       <circle cx="12" cy="19" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -184,6 +203,65 @@ function ModeSegmentPill({
   );
 }
 
+function ContextScopePill({
+  value,
+  onChange,
+  sessionConfigured,
+  projectConfigured,
+}: {
+  value: ContextImportScope;
+  onChange: (scope: ContextImportScope) => void;
+  sessionConfigured: boolean;
+  projectConfigured: boolean;
+}) {
+  return (
+    <div
+      className="inline-flex items-center rounded-full p-0.5 bg-white/10 border border-white/15 shrink-0"
+      role="group"
+      aria-label="Context scope"
+    >
+      {([
+        { id: "session", label: "Session", configured: sessionConfigured },
+        { id: "project", label: "Project", configured: projectConfigured },
+      ] as const).map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          onClick={() => onChange(option.id)}
+          aria-label={
+            option.configured ? `${option.label}, configured` : `${option.label}, not configured`
+          }
+          className={`h-6 px-2.5 rounded-full text-[12px] font-medium leading-none inline-flex items-center justify-center transition ${
+            value === option.id
+              ? "bg-white/25 text-white shadow-sm"
+              : "text-white/55 hover:text-white/75"
+          }`}
+        >
+          <span className="inline-flex items-center gap-1.5 translate-y-px">
+            {option.configured ? (
+              <span className="w-1.5 h-1.5 rounded-full bg-white/70 shrink-0" aria-hidden />
+            ) : null}
+            {option.label}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Empty-output hint: which standing contexts are attached to Refine. */
+function contextStatusPlaceholder(
+  activeSession: SessionContext | null,
+  projectOn: boolean,
+): string {
+  const sessionOn = Boolean(activeSession?.contextText.trim());
+  const sessionPart = sessionOn
+    ? `Session: on — ${activeSession!.title}`
+    : "Session: off";
+  const projectPart = projectOn ? "Project: on" : "Project: off";
+  return `${sessionPart} · ${projectPart}`;
+}
+
 function GlassPill({
   children,
   onClick,
@@ -233,8 +311,18 @@ export function Overlay() {
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [terminalContext, setTerminalContext] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
-  const [importedContext, setImportedContext] = useState("");
+  const [newSessionPickerOpen, setNewSessionPickerOpen] = useState(false);
+  const [pickerProjects, setPickerProjects] = useState<ProjectContext[]>([]);
+  const [pendingDeleteProject, setPendingDeleteProject] = useState<ProjectContext | null>(null);
+  const [contextImportScope, setContextImportScope] = useState<ContextImportScope>("session");
+  const [importedSessionContext, setImportedSessionContext] = useState("");
+  const [importedProjectContext, setImportedProjectContext] = useState("");
+  /** Persisted standing project context — drives the empty-output status hint. */
+  const [standingProjectContext, setStandingProjectContext] = useState("");
   const [importPromptCopied, setImportPromptCopied] = useState(false);
+  const [contextSaved, setContextSaved] = useState(false);
+  const [activeSession, setActiveSession] = useState<SessionContext | null>(null);
+  const [sessions, setSessions] = useState<SessionContext[]>([]);
   const captureRef = useRef<{
     text: string;
     mode: CaptureMode;
@@ -264,6 +352,14 @@ export function Overlay() {
     });
   }
 
+  function refreshActiveSession(): void {
+    void api.sessionGetActive().then(setActiveSession);
+  }
+
+  function refreshStandingProjectContext(): void {
+    void api.projectContextGet().then(setStandingProjectContext);
+  }
+
   function resetOverlaySession(): void {
     flushSync(() => {
       captureRef.current = null;
@@ -280,7 +376,13 @@ export function Overlay() {
       setSegmentMode("prompting");
       setWritingType("question");
       setShellVisible(false);
+      setContextModalOpen(false);
+      setNewSessionPickerOpen(false);
+      setContextSaved(false);
+      setImportPromptCopied(false);
     });
+    refreshActiveSession();
+    refreshStandingProjectContext();
     ackOverlayPrepared();
   }
 
@@ -292,6 +394,9 @@ export function Overlay() {
       setLevel(s.defaultLevel);
       setOverlayPlacement(s.overlayPlacement);
     })();
+    // Restore the persisted active session + project context (survives app restarts).
+    void api.sessionGetActive().then(setActiveSession);
+    void api.projectContextGet().then(setStandingProjectContext);
 
     const applyCapture = (detail: {
       text: string;
@@ -324,7 +429,13 @@ export function Overlay() {
         setMenuOpen(false);
         setApplyNotice(null);
         setShellVisible(true);
+        setContextModalOpen(false);
+        setNewSessionPickerOpen(false);
+        setContextSaved(false);
+        setImportPromptCopied(false);
       });
+      void api.sessionGetActive().then(setActiveSession);
+      void api.projectContextGet().then(setStandingProjectContext);
       ackOverlayPrepared();
     };
 
@@ -365,6 +476,101 @@ export function Overlay() {
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [menuOpen]);
+
+  // Recent sessions for the switcher, fetched on menu open.
+  useEffect(() => {
+    if (!menuOpen) return;
+    void api.sessionList().then(setSessions);
+  }, [menuOpen]);
+
+  async function onNewSession() {
+    setMenuOpen(false);
+    setPendingDeleteProject(null);
+    setNewSessionPickerOpen(true);
+    const [{ projects }, sessionList] = await Promise.all([api.projectList(), api.sessionList()]);
+    setPickerProjects(projects);
+    setSessions(sessionList);
+  }
+
+  /** One-click: pick a project (or none) and start the session immediately. */
+  async function onStartNewSession(projectId: string | null) {
+    const session = await api.sessionCreate(projectId);
+    setActiveSession(session);
+    if (!projectId) {
+      await api.projectSetActive(null);
+      setStandingProjectContext("");
+      setImportedProjectContext("");
+    } else {
+      const chosen = pickerProjects.find((p) => p.id === projectId);
+      const activated = await api.projectSetActive(projectId);
+      const text = activated?.contextText ?? chosen?.contextText ?? "";
+      setStandingProjectContext(text);
+      setImportedProjectContext(text);
+    }
+    setPendingDeleteProject(null);
+    setNewSessionPickerOpen(false);
+  }
+
+  async function onConfirmDeleteProject() {
+    if (!pendingDeleteProject) return;
+    const id = pendingDeleteProject.id;
+    await api.projectDelete(id);
+    setPickerProjects((prev) => prev.filter((p) => p.id !== id));
+    setSessions((prev) => prev.filter((s) => s.projectId !== id));
+    if (activeSession?.projectId === id) {
+      setActiveSession(await api.sessionGetActive());
+    }
+    const stillActive = await api.projectContextGet();
+    setStandingProjectContext(stillActive);
+    if (!stillActive.trim()) setImportedProjectContext("");
+    setPendingDeleteProject(null);
+  }
+
+  async function onClearSession() {
+    if (!activeSession) return;
+    setActiveSession(await api.sessionClear(activeSession.id));
+    setMenuOpen(false);
+  }
+
+  async function onResumeSession(id: string) {
+    const session = await api.sessionSetActive(id);
+    setActiveSession(session);
+    if (session?.projectId) {
+      const activated = await api.projectSetActive(session.projectId);
+      const text = activated?.contextText ?? "";
+      setStandingProjectContext(text);
+      setImportedProjectContext(text);
+    } else {
+      await api.projectSetActive(null);
+      setStandingProjectContext("");
+      setImportedProjectContext("");
+    }
+    setMenuOpen(false);
+  }
+
+  async function onDeleteSession(id: string) {
+    await api.sessionDelete(id);
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (activeSession?.id === id) {
+      setActiveSession(await api.sessionGetActive());
+    }
+  }
+
+  async function onAddToContext() {
+    if (contextImportScope === "project") {
+      const project = await api.projectUpsertActive(importedProjectContext);
+      setStandingProjectContext(project.contextText);
+      setImportedProjectContext(project.contextText);
+    } else {
+      const target = activeSession ?? (await api.sessionCreate());
+      setActiveSession(await api.sessionSetContext(target.id, importedSessionContext));
+    }
+    setContextSaved(true);
+    window.setTimeout(() => {
+      setContextSaved(false);
+      setContextModalOpen(false);
+    }, 900);
+  }
 
   async function runOptimize() {
     if (!prompt.trim()) return;
@@ -419,9 +625,15 @@ export function Overlay() {
   }
 
   async function onCopyImportPrompt() {
-    await api.captureCopy(CONTEXT_IMPORT_PROMPT);
+    await api.captureCopy(contextImportPromptFor(contextImportScope));
     setImportPromptCopied(true);
     window.setTimeout(() => setImportPromptCopied(false), 2000);
+  }
+
+  function onContextImportScopeChange(scope: ContextImportScope) {
+    if (scope === contextImportScope) return;
+    setContextImportScope(scope);
+    setImportPromptCopied(false);
   }
 
   async function onPlacementChange(placement: OverlayPlacement) {
@@ -478,7 +690,7 @@ export function Overlay() {
     ? "Capturing…"
     : busy
       ? "Refining…"
-      : "Session context: off";
+      : contextStatusPlaceholder(activeSession, Boolean(standingProjectContext.trim()));
 
   const keyMissingError = phase === "error" && outputText.includes("API key not configured");
   const phaseAnnouncement = capturing
@@ -524,19 +736,56 @@ export function Overlay() {
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-full mt-1 flex items-start gap-2">
-              <div className="flex flex-col gap-2 shrink-0">
+              <div className="flex flex-col gap-2 shrink-0 w-[168px]">
                 <button
                   type="button"
+                  onClick={() => void onNewSession()}
                   className="apple-glass-menu w-full rounded-xl py-2 px-3 text-sm text-center text-white hover:bg-white/10"
                 >
                   + New session
                 </button>
                 <button
                   type="button"
-                  className="apple-glass-menu w-full rounded-xl py-2 px-3 text-sm text-center text-white hover:bg-white/10"
+                  onClick={() => void onClearSession()}
+                  disabled={!activeSession?.contextText.trim()}
+                  className="apple-glass-menu w-full rounded-xl py-2 px-3 text-sm text-center text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Clear session
                 </button>
+                {sessions.length > 0 && (
+                  <div className="apple-glass-menu w-full rounded-xl py-1 text-white">
+                    <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-wider text-white/50">
+                      Sessions
+                    </div>
+                    {sessions.slice(0, 5).map((s) => (
+                      <div key={s.id} className="flex items-center gap-0.5 pr-1">
+                        <button
+                          type="button"
+                          onClick={() => void onResumeSession(s.id)}
+                          className={`min-w-0 flex-1 text-left px-3 py-1.5 text-[13px] truncate hover:bg-white/10 ${
+                            s.id === activeSession?.id ? "text-white" : "text-white/60"
+                          }`}
+                          title={s.title}
+                        >
+                          {s.id === activeSession?.id ? "• " : ""}
+                          {s.title}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void onDeleteSession(s.id);
+                          }}
+                          className="shrink-0 p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition"
+                          aria-label="Delete session"
+                          title="Delete session"
+                        >
+                          <TrashIcon />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="apple-glass-menu min-w-[180px] rounded-xl py-2 text-white">
               <div className="px-3 pb-2">
@@ -549,6 +798,15 @@ export function Overlay() {
                 onClick={() => {
                   setMenuOpen(false);
                   setImportPromptCopied(false);
+                  setContextSaved(false);
+                  setContextImportScope("session");
+                  // Prefill from the store so the modal doubles as the editor.
+                  setImportedSessionContext(activeSession?.contextText ?? "");
+                  setImportedProjectContext(standingProjectContext);
+                  void api.projectContextGet().then((text) => {
+                    setStandingProjectContext(text);
+                    setImportedProjectContext(text);
+                  });
                   setContextModalOpen(true);
                 }}
                 className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
@@ -698,6 +956,137 @@ export function Overlay() {
         </div>
       </div>
 
+      {newSessionPickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-6"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) {
+              setPendingDeleteProject(null);
+              setNewSessionPickerOpen(false);
+            }
+          }}
+        >
+          <div className="apple-glass-menu relative w-full max-w-[360px] rounded-[24px] p-5 text-white">
+            {pendingDeleteProject ? (
+              <>
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <h2 className="text-[16px] font-medium">Delete project?</h2>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteProject(null)}
+                    className="text-white/50 hover:text-white transition shrink-0"
+                    aria-label="Close"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="text-[13px] text-white/70 mb-1 leading-relaxed">
+                  <span className="text-white">{pendingDeleteProject.title}</span> will be permanently
+                  removed.
+                </p>
+                {(() => {
+                  const linkedCount = sessions.filter(
+                    (s) => s.projectId === pendingDeleteProject.id,
+                  ).length;
+                  return linkedCount > 0 ? (
+                    <p className="text-[13px] text-white/55 mb-4 leading-relaxed">
+                      This also deletes {linkedCount} linked session
+                      {linkedCount === 1 ? "" : "s"}.
+                    </p>
+                  ) : (
+                    <p className="text-[13px] text-white/55 mb-4 leading-relaxed">
+                      No linked sessions will be affected.
+                    </p>
+                  );
+                })()}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteProject(null)}
+                    className="rounded-xl px-3.5 py-2 text-[13px] text-white/70 hover:bg-white/10 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onConfirmDeleteProject()}
+                    className="rounded-xl px-3.5 py-2 text-[13px] bg-white/15 hover:bg-white/25 text-white transition"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="text-[16px] font-medium">Start with project context?</h2>
+              <button
+                type="button"
+                onClick={() => setNewSessionPickerOpen(false)}
+                className="text-white/50 hover:text-white transition shrink-0"
+                aria-label="Close"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div
+              className="mb-1 max-h-[200px] overflow-y-auto scroll-thin rounded-xl border border-white/10 bg-black/30 p-1"
+              role="listbox"
+              aria-label="Project"
+            >
+              <button
+                type="button"
+                role="option"
+                onClick={() => void onStartNewSession(null)}
+                className="w-full text-left rounded-lg px-3 py-2 text-[13px] transition text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                No project
+              </button>
+              {pickerProjects.map((p) => (
+                <div key={p.id} className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    role="option"
+                    onClick={() => void onStartNewSession(p.id)}
+                    className="min-w-0 flex-1 text-left rounded-lg px-3 py-2 text-[13px] transition truncate text-white/70 hover:bg-white/10 hover:text-white"
+                    title={p.title}
+                  >
+                    {p.title}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDeleteProject(p);
+                    }}
+                    className="shrink-0 p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition"
+                    aria-label={`Delete project ${p.title}`}
+                    title="Delete project"
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setNewSessionPickerOpen(false)}
+                className="rounded-xl px-3.5 py-2 text-[13px] text-white/70 hover:bg-white/10 transition"
+              >
+                Cancel
+              </button>
+            </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {contextModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center px-6"
@@ -706,12 +1095,12 @@ export function Overlay() {
           }}
         >
           <div className="apple-glass-menu relative w-full max-w-[480px] rounded-[24px] p-5 text-white">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between gap-3 mb-4">
               <h2 className="text-[16px] font-medium">Import context to ANVYL.ai</h2>
               <button
                 type="button"
                 onClick={() => setContextModalOpen(false)}
-                className="text-white/50 hover:text-white transition"
+                className="text-white/50 hover:text-white transition shrink-0"
                 aria-label="Close"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -737,7 +1126,7 @@ export function Overlay() {
                 </div>
                 <div className="relative mx-3 rounded-xl bg-black/25 border border-white/10">
                   <div className="h-[88px] overflow-y-auto scroll-thin px-3.5 py-3 pr-[72px] text-[13px] leading-relaxed text-white/70 whitespace-pre-wrap select-text">
-                    {CONTEXT_IMPORT_PROMPT}
+                    {contextImportPromptFor(contextImportScope)}
                   </div>
                   <button
                     type="button"
@@ -755,14 +1144,22 @@ export function Overlay() {
                     2
                   </span>
                   <span className="text-[13px] text-white/80">
-                    Paste results below to add to the Session's context
+                    {contextImportScope === "project"
+                      ? "Paste results below to add to the Project's context"
+                      : "Paste results below to add to the Session's context"}
                   </span>
                 </div>
                 <div className="mx-3">
                   <textarea
-                    value={importedContext}
-                    onChange={(e) => setImportedContext(e.target.value)}
+                    value={
+                      contextImportScope === "project" ? importedProjectContext : importedSessionContext
+                    }
+                    onChange={(e) => {
+                      if (contextImportScope === "project") setImportedProjectContext(e.target.value);
+                      else setImportedSessionContext(e.target.value);
+                    }}
                     placeholder="Paste your context details here"
+                    maxLength={SESSION_CONTEXT_MAX_CHARS}
                     className="w-full h-[88px] rounded-xl bg-black/25 border border-white/10 px-3.5 py-3 text-[13px] leading-relaxed text-white placeholder:text-white/40 resize-none focus:outline-none scroll-thin"
                   />
                 </div>
@@ -770,6 +1167,14 @@ export function Overlay() {
             </div>
 
             <div className="flex items-center justify-end gap-2">
+              <div className="translate-y-[2px]">
+                <ContextScopePill
+                  value={contextImportScope}
+                  onChange={onContextImportScopeChange}
+                  sessionConfigured={Boolean(importedSessionContext.trim())}
+                  projectConfigured={Boolean(importedProjectContext.trim())}
+                />
+              </div>
               <button
                 type="button"
                 onClick={() => setContextModalOpen(false)}
@@ -779,10 +1184,10 @@ export function Overlay() {
               </button>
               <button
                 type="button"
-                onClick={() => setContextModalOpen(false)}
+                onClick={() => void onAddToContext()}
                 className="rounded-xl px-3.5 py-2 text-[13px] bg-white/15 hover:bg-white/25 transition"
               >
-                Add to context
+                {contextSaved ? "Added" : "Add to context"}
               </button>
             </div>
           </div>

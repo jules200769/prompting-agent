@@ -31,8 +31,8 @@ export const MODELS: ModelInfo[] = [
 /** Single rewrite LLM used for all optimizations regardless of target model. */
 export const REWRITE_CONFIG = {
   provider: "openai" as const,
-  modelId: "gpt-4.1-mini",
-  label: "GPT-4.1 mini",
+  modelId: "gpt-4.1",
+  label: "GPT-4.1",
   /** Fixed optimal temperature — never varies by level or user setting. */
   temperature: 0.3,
 } as const;
@@ -67,10 +67,9 @@ export const CONTEXT_CAPS = {
   afterCursor: 500,
   windowTitle: 200,
   files: 10,
-  styleHint: 300,
 } as const;
 
-/** Destination app category — drives the style directive applied to the rewrite. */
+/** Destination app category — used for destination context labeling. */
 export type AppCategory =
   | "ai-chat"
   | "code-editor"
@@ -131,12 +130,6 @@ export interface CaptureContext {
   };
   /** UI preselect only — never rendered into the meta-prompt block. */
   suggestedModel?: ModelId;
-  /**
-   * Resolved, settings-aware style directive for the destination category.
-   * Rendered into the DESTINATION CONTEXT block; absent when style matching is
-   * disabled, the category preset is "off", or the category is "other".
-   */
-  styleHint?: string;
 }
 
 /**
@@ -222,6 +215,10 @@ export interface OptimizeRequest {
   writingType?: WritingType;
   /** Destination context captured at hotkey time (screenContext on); shapes the rewrite fit. */
   captureContext?: CaptureContext;
+  /** Active-session context. Resolved main-side in runOptimize; renderer-supplied values are overwritten. */
+  sessionContext?: string;
+  /** Standing project context; same main-side resolution rule as sessionContext. */
+  projectContext?: string;
 }
 
 export interface LibraryItem {
@@ -360,6 +357,19 @@ export const IPC = {
   LIBRARY_DELETE: "promptforge:library:delete",
   HISTORY_LIST: "promptforge:history:list",
   HISTORY_CLEAR: "promptforge:history:clear",
+  SESSION_LIST: "promptforge:session:list",
+  SESSION_CREATE: "promptforge:session:create",
+  SESSION_SET_CONTEXT: "promptforge:session:set-context",
+  SESSION_CLEAR: "promptforge:session:clear",
+  SESSION_DELETE: "promptforge:session:delete",
+  SESSION_SET_ACTIVE: "promptforge:session:set-active",
+  SESSION_GET_ACTIVE: "promptforge:session:get-active",
+  PROJECT_CONTEXT_GET: "promptforge:project-context:get",
+  PROJECT_CONTEXT_SET: "promptforge:project-context:set",
+  PROJECT_LIST: "promptforge:project:list",
+  PROJECT_UPSERT_ACTIVE: "promptforge:project:upsert-active",
+  PROJECT_SET_ACTIVE: "promptforge:project:set-active",
+  PROJECT_DELETE: "promptforge:project:delete",
   OVERLAY_SHOW: "promptforge:overlay:show",
   OVERLAY_CAPTURE_PENDING: "promptforge:overlay:capture-pending",
   OVERLAY_PREPARED: "promptforge:overlay:prepared",

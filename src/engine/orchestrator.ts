@@ -48,6 +48,8 @@ export async function optimize(ctx: OptimizeContext): Promise<OptimizeResult> {
         promptType: request.promptType,
         writingType: request.writingType,
         captureContext: request.captureContext,
+        sessionContext: request.sessionContext,
+        projectContext: request.projectContext,
         apiKey,
       },
       {

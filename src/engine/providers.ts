@@ -1,10 +1,11 @@
-// Provider layer: always calls OpenAI GPT-4.1 mini for rewrites. The target
-// model's prompting guide supplies the prompt-engineering methodology.
+// Provider layer: OpenAI GPT-4.1 rewrites. The target model's prompting guide
+// supplies the prompt-engineering methodology.
 
 import OpenAI from "openai";
 import type { CaptureContext, ModelId, OptLevel, PromptType, WritingType } from "../shared/types";
 import { REWRITE_CONFIG } from "../shared/types";
 import { buildDestinationContextBlock } from "../shared/contextSignals";
+import { buildSessionContextBlock } from "../shared/session";
 import { getPack } from "./packs";
 import { getGuideExcerpt, getLevelRewriteInstruction, getLevelStructureContract } from "./guideLoader";
 import { buildWritingMetaPrompt } from "./writing";
@@ -24,6 +25,10 @@ export interface OptimizeParams {
   writingType?: WritingType;
   /** Destination context from hotkey capture; renders the DESTINATION CONTEXT block. */
   captureContext?: CaptureContext;
+  /** Active-session context (resolved main-side); renders the SESSION CONTEXT block. */
+  sessionContext?: string;
+  /** Standing project context (resolved main-side); renders the PROJECT CONTEXT block. */
+  projectContext?: string;
 }
 
 export interface StreamCallbacks {
@@ -43,7 +48,7 @@ export function buildMetaPrompt(params: Omit<OptimizeParams, "apiKey">): { syste
     ? `Use this persona/role if appropriate for the guide structure: ${params.persona.trim()}`
     : "";
   const contextLine = params.context?.trim()
-    ? `Standing context to incorporate where relevant: ${params.context.trim()}`
+    ? `Standing context to fold into the STRUCTURE CONTRACT where relevant (does not change Cool/Warm/Hot/Max shape): ${params.context.trim()}`
     : "";
   const PROMPT_TYPE_RULES: Partial<Record<PromptType, string>> = {
     question: `
@@ -137,6 +142,10 @@ TERMINAL SHELL (mandatory — overrides structure contract above):
   // persona/standing context so standing contextMemory stays a distinct signal.
   const destinationContextBlock = buildDestinationContextBlock(params.captureContext);
 
+  // Session/project context follows the destination block and precedes
+  // persona/standing context — grounding only, never structural.
+  const sessionBlock = buildSessionContextBlock(params.sessionContext, params.projectContext);
+
   const system = `You are an expert prompt engineer specializing in ${pack.label}.
 
 Your job: refine the user's prompt following the official prompting guide below. The refined prompt is what the user will paste into ${pack.label}.
@@ -148,12 +157,13 @@ ${guide}
 ${levelLine}
 
 ${structureBlock}
-${terminalOutputRule}${promptTypeRule}${actionLanguageRule}${constraintFramingRule}${gptOutcomeFirstRule}${composerStructureRule}${grokStructureRule}${geminiStructureRule}${destinationContextBlock}
+${terminalOutputRule}${promptTypeRule}${actionLanguageRule}${constraintFramingRule}${gptOutcomeFirstRule}${composerStructureRule}${grokStructureRule}${geminiStructureRule}${destinationContextBlock}${sessionBlock}
 ${personaLine}${personaLine ? "\n" : ""}${contextLine}
 
 OUTPUT RULES (strict):
 - Preserve the user's intent and facts; do not invent details about their situation
 ${params.terminalContext ? "- ONE line only — no \\n or paragraph breaks anywhere in the output" : "- Follow the STRUCTURE CONTRACT exactly for this level — Cool must stay plain prose; Max must keep all Level 3 section tags plus examples and success criteria"}
+- Destination and standing context are grounding only: include relevant pieces inside the contracted structure; never drop, soften, or swap the selected ${pack.label} guide rules because context is missing or abundant
 - Return ONLY the refined prompt as plain text
 - No JSON, no markdown fences, no commentary, no scores, no preamble like "Here is..."
 - The output must be ready to copy-paste directly into ${pack.label}`;
@@ -172,6 +182,8 @@ export async function optimizeStream(params: OptimizeParams, cb: StreamCallbacks
         level: params.level,
         context: params.context,
         captureContext: params.captureContext,
+        sessionContext: params.sessionContext,
+        projectContext: params.projectContext,
         terminalContext: params.terminalContext,
       })
     : buildMetaPrompt(params);

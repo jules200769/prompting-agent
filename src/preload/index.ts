@@ -1,6 +1,7 @@
 // Preload: exposes a tight allowlist IPC API to the renderer. No Node globals leak.
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type OptimizeRequest, type AppSettings, type CaptureContext, type CaptureMode, type HotkeyStatus, type InjectResult, type OverlayPlacement, type Provider, type SettingsSetResult, type WorkbenchSeed } from "../shared/types";
+import type { ProjectContext, SessionContext } from "../shared/session";
 
 type OverlayShowPayload = {
   text: string;
@@ -83,6 +84,29 @@ const api = {
 
   historyList: () => ipcRenderer.invoke(IPC.HISTORY_LIST),
   historyClear: () => ipcRenderer.invoke(IPC.HISTORY_CLEAR),
+
+  sessionList: () => ipcRenderer.invoke(IPC.SESSION_LIST) as Promise<SessionContext[]>,
+  sessionCreate: (projectId?: string | null) =>
+    ipcRenderer.invoke(IPC.SESSION_CREATE, projectId ?? null) as Promise<SessionContext>,
+  sessionSetContext: (id: string, text: string) =>
+    ipcRenderer.invoke(IPC.SESSION_SET_CONTEXT, id, text) as Promise<SessionContext | null>,
+  sessionClear: (id: string) => ipcRenderer.invoke(IPC.SESSION_CLEAR, id) as Promise<SessionContext | null>,
+  sessionDelete: (id: string) => ipcRenderer.invoke(IPC.SESSION_DELETE, id) as Promise<boolean>,
+  sessionSetActive: (id: string | null) =>
+    ipcRenderer.invoke(IPC.SESSION_SET_ACTIVE, id) as Promise<SessionContext | null>,
+  sessionGetActive: () => ipcRenderer.invoke(IPC.SESSION_GET_ACTIVE) as Promise<SessionContext | null>,
+  projectContextGet: () => ipcRenderer.invoke(IPC.PROJECT_CONTEXT_GET) as Promise<string>,
+  projectContextSet: (text: string) => ipcRenderer.invoke(IPC.PROJECT_CONTEXT_SET, text) as Promise<boolean>,
+  projectList: () =>
+    ipcRenderer.invoke(IPC.PROJECT_LIST) as Promise<{
+      projects: ProjectContext[];
+      activeProjectId: string | null;
+    }>,
+  projectUpsertActive: (text: string) =>
+    ipcRenderer.invoke(IPC.PROJECT_UPSERT_ACTIVE, text) as Promise<ProjectContext>,
+  projectSetActive: (id: string | null) =>
+    ipcRenderer.invoke(IPC.PROJECT_SET_ACTIVE, id) as Promise<ProjectContext | null>,
+  projectDelete: (id: string) => ipcRenderer.invoke(IPC.PROJECT_DELETE, id) as Promise<boolean>,
 
   openStudio: () => ipcRenderer.send(IPC.STUDIO_SHOW),
   openSettings: () => ipcRenderer.send(IPC.STUDIO_SETTINGS),

@@ -7,7 +7,11 @@ const base = { prompt: "Fix the bug", model: "gpt-5", level: 2 as const };
 describe("buildCacheKey", () => {
   it("keeps version, model, level, persona, and normalized prompt", () => {
     const key = buildCacheKey(9, { ...base, persona: "dev" });
-    expect(key).toBe("v9|gpt-5|2|dev||fix the bug");
+    expect(key).toBe("v9|rw:gpt-4.1|gpt-5|2|dev||fix the bug");
+  });
+
+  it("includes rewrite model in the cache key", () => {
+    expect(buildCacheKey(9, base)).toContain("|rw:gpt-4.1|");
   });
 
   it("includes standing context (pre-existing gap fixed)", () => {
@@ -67,24 +71,8 @@ describe("buildCacheKey", () => {
       mk({ files: { recentFiles: ["b.ts"] } }),
       mk({ app: { category: "email" } }),
       mk({ app: { category: "chat" } }),
-      mk({ styleHint: "Formal, professional tone." }),
-      mk({ styleHint: "Casual, conversational tone." }),
     ];
     expect(new Set(keys).size).toBe(keys.length);
-  });
-
-  it("an absent styleHint keys the same as an explicit undefined", () => {
-    const ctx: CaptureContext = { app: { site: "claude.ai", category: "ai-chat" } };
-    expect(buildCacheKey(9, { ...base, captureContext: ctx })).toBe(
-      buildCacheKey(9, { ...base, captureContext: { ...ctx, styleHint: undefined } }),
-    );
-  });
-
-  it("changing only the resolved styleHint text invalidates the key", () => {
-    const ctx: CaptureContext = { app: { site: "mail.google.com", category: "email" } };
-    const auto = buildCacheKey(9, { ...base, captureContext: { ...ctx, styleHint: "Professional, courteous tone suited to email." } });
-    const casual = buildCacheKey(9, { ...base, captureContext: { ...ctx, styleHint: "Casual, conversational tone." } });
-    expect(auto).not.toBe(casual);
   });
 
 });
@@ -103,4 +91,30 @@ describe("canonicalContextString / fnv1a", () => {
     expect(canonicalContextString({ suggestedModel: "gpt-5" })).toBe("");
   });
 
+});
+
+describe("buildCacheKey session/project context", () => {
+  it("session context changes the key; different texts differ", () => {
+    const none = buildCacheKey(9, base);
+    const a = buildCacheKey(9, { ...base, sessionContext: "session A" });
+    const b = buildCacheKey(9, { ...base, sessionContext: "session B" });
+    expect(a).not.toBe(none);
+    expect(a).not.toBe(b);
+    expect(a).toContain("|sess:");
+  });
+
+  it("empty or whitespace session context hashes like no context", () => {
+    expect(buildCacheKey(9, { ...base, sessionContext: "" })).toBe(buildCacheKey(9, base));
+    expect(buildCacheKey(9, { ...base, sessionContext: "   " })).toBe(buildCacheKey(9, base));
+  });
+
+  it("project and session context contribute independently", () => {
+    const sess = buildCacheKey(9, { ...base, sessionContext: "x" });
+    const proj = buildCacheKey(9, { ...base, projectContext: "x" });
+    const both = buildCacheKey(9, { ...base, sessionContext: "x", projectContext: "x" });
+    expect(sess).not.toBe(proj);
+    expect(both).not.toBe(sess);
+    expect(both).toContain("|sess:");
+    expect(both).toContain("|proj:");
+  });
 });

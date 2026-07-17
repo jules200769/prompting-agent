@@ -11,6 +11,7 @@ import { clipboard, app } from "electron";
 import type { CaptureContext, CaptureMode } from "../shared/types";
 import { resolveCaptureResult, pickResolvedCaptureText } from "../shared/captureResolve";
 import { shouldUseEarlyCaptureFastPath } from "../shared/captureFastPath";
+import { stripUiPrivateUseGlyphs } from "../shared/captureTextSanitize";
 import { isTerminalCaptureContext, isCaptureNoiseText } from "../shared/terminalDetect";
 import {
   resolveCaptureFromPossibleTerminal,
@@ -319,7 +320,7 @@ interface HotkeySnapshotJson {
 }
 
 function sanitizeCaptureText(text: string | null | undefined): string | null {
-  const trimmed = text?.trim() ?? "";
+  const trimmed = stripUiPrivateUseGlyphs(text ?? "").trim();
   if (!trimmed || isCaptureNoiseText(trimmed)) return null;
   if (isTerminalBufferDump(trimmed)) {
     return resolveCaptureFromPossibleTerminal(trimmed, lastSnapshotContext).text || null;
@@ -334,7 +335,7 @@ function sanitizeTerminalCaptureText(text: string | null | undefined): string | 
 }
 
 function finalizeCaptureText(raw: string): TerminalCaptureResolution {
-  return resolveCaptureFromPossibleTerminal(raw, lastSnapshotContext);
+  return resolveCaptureFromPossibleTerminal(stripUiPrivateUseGlyphs(raw), lastSnapshotContext);
 }
 
 /** Combined foreground + UIA snapshot in one PS spawn (call before hideForCapture on slow path). */
@@ -445,6 +446,13 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
 
     const meta = await readCaptureMeta(metaPath);
     pendingUiaMeta = meta;
+    if (meta) {
+      lastSnapshotContext = {
+        ...lastSnapshotContext,
+        elementClassName: meta.className,
+        controlType: meta.controlType,
+      };
+    }
 
     let earlyRaw: string | null = null;
     try {
@@ -455,7 +463,8 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
 
     if (earlyRaw?.trim()) {
       const resolved = resolveCaptureFromPossibleTerminal(earlyRaw, lastSnapshotContext);
-      if (resolved.mode === "terminal") {
+      // Text heuristics must not override PS/UIA non-terminal identity (handled in resolve).
+      if (resolved.mode === "terminal" && resolved.terminalContext) {
         pendingIsTerminal = true;
         pendingUiaMeta = null;
         pendingCaptureText = resolved.text || null;
@@ -712,6 +721,13 @@ export async function captureSelection(): Promise<CaptureResult> {
     await unlink(metaPath).catch(() => {});
   }
   const uiaMeta = consumeUiaMeta(uiaFromScript);
+  if (uiaMeta && !lastSnapshotContext.elementClassName) {
+    lastSnapshotContext = {
+      ...lastSnapshotContext,
+      elementClassName: uiaMeta.className,
+      controlType: uiaMeta.controlType,
+    };
+  }
   const earlyText = consumeEarlyCaptureText();
   const picked = pickCaptureText(captured, earlyText);
   const resolved = finalizeCaptureText(picked.trim());
