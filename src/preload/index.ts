@@ -1,6 +1,7 @@
 // Preload: exposes a tight allowlist IPC API to the renderer. No Node globals leak.
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type OptimizeRequest, type AppSettings, type CaptureContext, type CaptureMode, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type InjectResult, type OverlayPlacement, type Provider, type RunRecord, type SettingsSetResult, type WorkbenchSeed } from "../shared/types";
+import type { ContextImportScope } from "../shared/contextImportPrompt";
 import type { ProjectContext, SessionContext } from "../shared/session";
 
 type OverlayShowPayload = {
@@ -9,6 +10,8 @@ type OverlayShowPayload = {
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
   context?: CaptureContext;
+  /** ANVYL summary detected on the clipboard at delivery — drives the consent toast. */
+  clipboardSummary?: { scope: ContextImportScope; text: string };
 };
 
 const overlayShowCallbacks = new Set<(payload: OverlayShowPayload) => void>();
@@ -100,6 +103,8 @@ const api = {
   sessionSetActive: (id: string | null) =>
     ipcRenderer.invoke(IPC.SESSION_SET_ACTIVE, id) as Promise<SessionContext | null>,
   sessionGetActive: () => ipcRenderer.invoke(IPC.SESSION_GET_ACTIVE) as Promise<SessionContext | null>,
+  sessionMaybeTitleFromPrompt: (id: string, prompt: string) =>
+    ipcRenderer.invoke(IPC.SESSION_MAYBE_TITLE_FROM_PROMPT, id, prompt) as Promise<SessionContext | null>,
   projectContextGet: () => ipcRenderer.invoke(IPC.PROJECT_CONTEXT_GET) as Promise<string>,
   projectContextSet: (text: string) => ipcRenderer.invoke(IPC.PROJECT_CONTEXT_SET, text) as Promise<boolean>,
   projectList: () =>
@@ -109,6 +114,8 @@ const api = {
     }>,
   projectUpsertActive: (text: string) =>
     ipcRenderer.invoke(IPC.PROJECT_UPSERT_ACTIVE, text) as Promise<ProjectContext>,
+  projectSetContextById: (id: string, text: string) =>
+    ipcRenderer.invoke(IPC.PROJECT_SET_CONTEXT_BY_ID, id, text) as Promise<ProjectContext | null>,
   projectSetActive: (id: string | null) =>
     ipcRenderer.invoke(IPC.PROJECT_SET_ACTIVE, id) as Promise<ProjectContext | null>,
   projectDelete: (id: string) => ipcRenderer.invoke(IPC.PROJECT_DELETE, id) as Promise<boolean>,

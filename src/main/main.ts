@@ -1,6 +1,7 @@
 // Electron main: lifecycle, overlay + studio windows, tray, global hotkey, IPC.
-import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell, screen } from "electron";
+import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell, screen, clipboard } from "electron";
 import { join } from "node:path";
+import { detectContextSummary } from "../shared/contextSummaryDetect";
 import { DEFAULT_SETTINGS, IPC, type AppSettings, type CaptureContext, type CaptureMode, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type OptimizeRequest, type OverlayPlacement, type Provider, type RunSurface, type SettingsSetResult, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
 import { resolveOverlayPosition } from "../shared/overlayPosition";
 import { acceleratorDisplayParts, normalizeAccelerator } from "../shared/accelerator";
@@ -213,6 +214,12 @@ async function deliverCaptureToOverlay(capture: {
   if (!overlaySessionOpen) {
     revealOverlay();
   }
+  // On overlay focus (this delivery moment, incl. the second-show-while-open path)
+  // check the clipboard once for an ANVYL summary. capture.ts already restored the
+  // pre-capture clipboard, so this reads what the user last copied (the AI's answer).
+  // Only text matching ANVYL's own format ever crosses IPC — the privacy boundary.
+  const clip = clipboard.readText();
+  const summaryScope = detectContextSummary(clip);
   const prepared = waitForOverlayPrepared();
   overlay.webContents.send(IPC.OVERLAY_SHOW, {
     text: capture.text,
@@ -220,6 +227,7 @@ async function deliverCaptureToOverlay(capture: {
     snapshot: capture.snapshot,
     terminalContext: capture.terminalContext ?? false,
     context: capture.context,
+    clipboardSummary: summaryScope ? { scope: summaryScope, text: clip } : undefined,
   });
   await prepared;
   overlay.setOpacity(1);
@@ -607,6 +615,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.SESSION_DELETE, (_evt, id: string) => { store.deleteSession(id); return true; });
   ipcMain.handle(IPC.SESSION_SET_ACTIVE, (_evt, id: string | null) => store.setActiveSession(id));
   ipcMain.handle(IPC.SESSION_GET_ACTIVE, () => store.getActiveSession());
+  ipcMain.handle(IPC.SESSION_MAYBE_TITLE_FROM_PROMPT, (_evt, id: string, prompt: string) =>
+    store.maybeTitleSessionFromPrompt(id, prompt),
+  );
   ipcMain.handle(IPC.PROJECT_CONTEXT_GET, () => store.getProjectContext());
   ipcMain.handle(IPC.PROJECT_CONTEXT_SET, (_evt, text: string) => { store.setProjectContext(text); return true; });
   ipcMain.handle(IPC.PROJECT_LIST, () => ({
@@ -614,6 +625,9 @@ function registerIpc(): void {
     activeProjectId: store.getActiveProjectId(),
   }));
   ipcMain.handle(IPC.PROJECT_UPSERT_ACTIVE, (_evt, text: string) => store.upsertActiveProject(text));
+  ipcMain.handle(IPC.PROJECT_SET_CONTEXT_BY_ID, (_evt, id: string, text: string) =>
+    store.setProjectContextById(id, text),
+  );
   ipcMain.handle(IPC.PROJECT_SET_ACTIVE, (_evt, id: string | null) => store.setActiveProject(id));
   ipcMain.handle(IPC.PROJECT_DELETE, (_evt, id: string) => { store.deleteProject(id); return true; });
 

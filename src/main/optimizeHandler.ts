@@ -2,6 +2,7 @@
 
 import type { OptimizeRequest, OptimizeWithRunId, RunSurface } from "../shared/types";
 import { optimize } from "../engine/orchestrator";
+import { computeGrounding } from "../shared/grounding";
 import * as store from "./storage";
 
 export async function runOptimize(
@@ -19,15 +20,18 @@ export async function runOptimize(
     sessionContext: sessionText || undefined,
     projectContext: projectText || undefined,
   };
+  // Computed per-request from the live store (before the cache lookup) so a
+  // fromCache run's chips reflect this run's context, not the run that filled it.
+  const grounding = computeGrounding(Boolean(sessionText), Boolean(projectText), req.captureContext);
   const hash = store.cacheHash(enriched);
   const cached = enriched.skipCache ? null : store.getCache(hash, enriched.prompt);
   if (cached) {
     onText(cached.optimizedPrompt);
     const runId = store.addRunRecord(cached, enriched, surface, true);
-    return { ...cached, runId };
+    return { ...cached, runId, grounding };
   }
   const result = await optimize({ request: enriched, onText });
   store.setCache(hash, result);
   const runId = store.addRunRecord(result, enriched, surface, false);
-  return { ...result, runId };
+  return { ...result, runId, grounding };
 }

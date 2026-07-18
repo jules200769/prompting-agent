@@ -1,5 +1,7 @@
 import {
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -9,41 +11,26 @@ import {
 import { flushSync } from "react-dom";
 import { api } from "../api";
 import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
-import type { CaptureContext, CaptureMode, ModelId, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
+import type { CaptureContext, CaptureMode, ModelId, OptimizeGrounding, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
 import { MODELS, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
 import { toTerminalSingleLine, stripTerminalStreamChunk } from "../../shared/terminalOutput";
 import {
   type ContextImportScope,
   contextImportPromptFor,
 } from "../../shared/contextImportPrompt";
-import { SESSION_CONTEXT_MAX_CHARS, type ProjectContext, type SessionContext } from "../../shared/session";
+import { NEW_SESSION_TITLE, SESSION_CONTEXT_MAX_CHARS, type ProjectContext, type SessionContext } from "../../shared/session";
 import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
 import { ModelPicker } from "../components/ModelPicker";
 import { WritingTypePicker, type WritingType, writingLevelLabels } from "../components/WritingTypePicker";
+import { ContextPanel } from "../components/ContextPanel";
 
 type Phase = "idle" | "capturing" | "optimizing" | "done" | "error";
+type CaptureGlow = "off" | "active";
 
-function MoreIcon() {
+function MenuLinesIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="12" cy="5" r="2" fill="currentColor" />
-      <circle cx="12" cy="12" r="2" fill="currentColor" />
-      <circle cx="12" cy="19" r="2" fill="currentColor" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -209,13 +196,16 @@ function ContextScopePill({
   sessionConfigured,
   projectConfigured,
   lockedScope,
+  lockedLabelDetail,
 }: {
   value: ContextImportScope;
   onChange: (scope: ContextImportScope) => void;
   sessionConfigured: boolean;
   projectConfigured: boolean;
-  /** When set, only that scope is shown — used by "+ New Project" flow. */
+  /** When set, only that scope is shown as a non-interactive label. */
   lockedScope?: ContextImportScope;
+  /** Optional target name appended to the locked label (e.g. session/project title). */
+  lockedLabelDetail?: string;
 }) {
   const options = (
     [
@@ -223,6 +213,7 @@ function ContextScopePill({
       { id: "project", label: "Project", configured: projectConfigured },
     ] as const
   ).filter((option) => !lockedScope || option.id === lockedScope);
+  const locked = Boolean(lockedScope);
 
   return (
     <div
@@ -234,8 +225,9 @@ function ContextScopePill({
         <button
           key={option.id}
           type="button"
+          disabled={locked}
           onClick={() => {
-            if (lockedScope) return;
+            if (locked) return;
             onChange(option.id);
           }}
           aria-label={
@@ -245,13 +237,13 @@ function ContextScopePill({
             value === option.id
               ? "bg-white/25 text-white shadow-sm"
               : "text-white/55 hover:text-white/75"
-          }`}
+          } ${locked ? "cursor-default disabled:opacity-100" : ""}`}
         >
           <span className="inline-flex items-center gap-1.5 translate-y-px">
             {option.configured ? (
               <span className="w-1.5 h-1.5 rounded-full bg-white/70 shrink-0" aria-hidden />
             ) : null}
-            {option.label}
+            {locked && lockedLabelDetail ? `${option.label} — ${lockedLabelDetail}` : option.label}
           </span>
         </button>
       ))}
@@ -265,6 +257,9 @@ function contextStatusPlaceholder(
   projectOn: boolean,
 ): string {
   const sessionOn = Boolean(activeSession?.contextText.trim());
+  if (!sessionOn && !projectOn) {
+    return "No context yet — add a session or project so refinements understand your work.";
+  }
   const sessionPart = sessionOn
     ? `Session: on — ${activeSession!.title}`
     : "Session: off";
@@ -295,6 +290,56 @@ function GlassPill({
   );
 }
 
+/**
+ * One-line context bar atop the overlay card: project dot + name / session
+ * title + chevron. Always rendered (no appearance animation) so the shell shows
+ * instantly; opens the unified context surface on click.
+ */
+function ContextBar({
+  project,
+  session,
+  open,
+  onClick,
+  disabled,
+}: {
+  project: ProjectContext | null;
+  session: SessionContext | null;
+  open: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  const projectName = project?.title ?? "No project";
+  const sessionTitle = session ? session.title : "No session";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-label={`Context: ${projectName} / ${sessionTitle}`}
+      className="group flex w-full items-center gap-2 h-7 px-2 -mx-1 mb-2 rounded-[10px] hover:bg-white/[.06] transition text-[13px] min-w-0 disabled:opacity-40 disabled:cursor-not-allowed"
+    >
+      <span
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: project?.color ?? "rgba(255,255,255,.25)" }}
+        aria-hidden
+      />
+      <span className="shrink-0 max-w-[40%] truncate text-white/45">{projectName}</span>
+      <span className="shrink-0 text-white/30" aria-hidden>
+        /
+      </span>
+      <span className="min-w-0 flex-1 truncate text-white font-medium">{sessionTitle}</span>
+      <span
+        className={`ml-auto shrink-0 text-white/40 text-[11px] transition-transform ${open ? "rotate-180" : ""}`}
+        aria-hidden
+      >
+        ▾
+      </span>
+    </button>
+  );
+}
+
 export function Overlay() {
   const [mode, setMode] = useState<CaptureMode>("field");
   const [model, setModel] = useState<ModelId>("claude-opus-4.8");
@@ -316,17 +361,28 @@ export function Overlay() {
     waitUntilRevealed,
   } = useTypewriterReveal();
   const [hasGenerated, setHasGenerated] = useState(false);
+  /** Context layers that grounded the last completed refine — drives the chip row. */
+  const [lastGrounding, setLastGrounding] = useState<OptimizeGrounding | null>(null);
+  /** ANVYL summary detected on the clipboard at capture — drives the consent toast. */
+  const [clipboardSummary, setClipboardSummary] = useState<{
+    scope: ContextImportScope;
+    text: string;
+  } | null>(null);
+  const [clipboardSummaryAdded, setClipboardSummaryAdded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /** Visual-only capture-wait glow; exits with a short fade after phase leaves capturing. */
+  const [captureGlow, setCaptureGlow] = useState<CaptureGlow>("off");
   const [shellVisible, setShellVisible] = useState(false);
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [terminalContext, setTerminalContext] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
-  const [newSessionPickerOpen, setNewSessionPickerOpen] = useState(false);
-  /** True when Import context was opened from "+ New Project" (project scope locked). */
+  const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  /** True when "Bring context" was opened from "+ New Project" (project scope locked). */
   const [newProjectFlow, setNewProjectFlow] = useState(false);
-  const [pickerProjects, setPickerProjects] = useState<ProjectContext[]>([]);
   const [pendingDeleteProject, setPendingDeleteProject] = useState<ProjectContext | null>(null);
   const [contextImportScope, setContextImportScope] = useState<ContextImportScope>("session");
+  /** Non-active project targeted by the "memory" editor; null = active-project/session path. */
+  const [importTargetProjectId, setImportTargetProjectId] = useState<string | null>(null);
   const [importedSessionContext, setImportedSessionContext] = useState("");
   const [importedProjectContext, setImportedProjectContext] = useState("");
   /** Persisted standing project context — drives the empty-output status hint. */
@@ -335,6 +391,9 @@ export function Overlay() {
   const [contextSaved, setContextSaved] = useState(false);
   const [activeSession, setActiveSession] = useState<SessionContext | null>(null);
   const [sessions, setSessions] = useState<SessionContext[]>([]);
+  /** Full project library snapshot — drives the context bar, panel, and session-row accents. */
+  const [projects, setProjects] = useState<ProjectContext[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const captureRef = useRef<{
     text: string;
     mode: CaptureMode;
@@ -343,10 +402,21 @@ export function Overlay() {
     context?: CaptureContext;
   } | null>(null);
   const defaultModelRef = useRef<ModelId>("claude-opus-4.8");
+  const shellRef = useRef<HTMLDivElement>(null);
+  const copyAnchorRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const contextPanelRef = useRef<HTMLDivElement>(null);
+  const contextBarRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLTextAreaElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
-  const keyStateRef = useRef({ mode, phase, captureFailed: false });
+  const keyStateRef = useRef({
+    mode,
+    phase,
+    captureFailed: false,
+    panelOpen: false,
+    modalOpen: false,
+    newProjectFlow: false,
+  });
   const actionsRef = useRef<{ runOptimize: () => void; onApply: () => void; onCopy: () => void }>({
     runOptimize: () => {},
     onApply: () => {},
@@ -354,8 +424,47 @@ export function Overlay() {
   });
   const lastRunIdRef = useRef<string | null>(null);
   const resumeContextModalRef = useRef(false);
+  /** Text of the last dismissed clipboard summary — suppresses repeat toasts (in-memory only). */
+  const lastDismissedSummaryRef = useRef<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
 
-  keyStateRef.current = { mode, phase, captureFailed: mode === "empty" };
+  const updateMenuPos = useCallback(() => {
+    const anchor = copyAnchorRef.current;
+    const shell = shellRef.current;
+    if (!anchor || !shell) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+    setMenuPos({
+      top: anchorRect.bottom - shellRect.top + 6,
+      left: anchorRect.left - shellRect.left + anchorRect.width / 2,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    updateMenuPos();
+    const shell = shellRef.current;
+    if (!shell) return;
+    const ro = new ResizeObserver(updateMenuPos);
+    ro.observe(shell);
+    window.addEventListener("resize", updateMenuPos);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateMenuPos);
+    };
+  }, [updateMenuPos, shellVisible, phase, segmentMode, contextPanelOpen, lastGrounding]);
+
+  useEffect(() => {
+    if (menuOpen) updateMenuPos();
+  }, [menuOpen, updateMenuPos]);
+
+  keyStateRef.current = {
+    mode,
+    phase,
+    captureFailed: mode === "empty",
+    panelOpen: contextPanelOpen,
+    modalOpen: contextModalOpen,
+    newProjectFlow,
+  };
 
   const isTerminalSession = mode === "terminal" || terminalContext;
 
@@ -366,23 +475,40 @@ export function Overlay() {
     });
   }
 
-  function refreshActiveSession(): void {
-    void api.sessionGetActive().then(setActiveSession);
+  /**
+   * One round-trip that resyncs every context surface (bar, panel, menu rows).
+   * The store is a local JSON doc, so four IPC calls per hotkey/mutation is
+   * negligible — cheaper than tracking five states independently.
+   */
+  function refreshContextSnapshot(): void {
+    void Promise.all([
+      api.sessionGetActive(),
+      api.projectContextGet(),
+      api.sessionList(),
+      api.projectList(),
+    ]).then(([active, projText, sessionList, { projects: projectList, activeProjectId: activeProj }]) => {
+      setActiveSession(active);
+      setStandingProjectContext(projText);
+      setSessions(sessionList);
+      setProjects(projectList);
+      setActiveProjectId(activeProj);
+    });
   }
 
-  function refreshStandingProjectContext(): void {
-    void api.projectContextGet().then(setStandingProjectContext);
-  }
-
-  function closeContextModal(opts?: { returnToSessionPicker?: boolean }): void {
-    const returnToPicker = opts?.returnToSessionPicker ?? false;
+  function closeContextModal(opts?: { returnToContextPanel?: boolean }): void {
+    const returnToPanel = opts?.returnToContextPanel ?? false;
     resumeContextModalRef.current = false;
     setNewProjectFlow(false);
+    setImportTargetProjectId(null);
     setContextModalOpen(false);
-    if (returnToPicker) {
+    if (returnToPanel) {
       setPendingDeleteProject(null);
-      setNewSessionPickerOpen(true);
+      setContextPanelOpen(true);
     }
+  }
+
+  function clearCaptureGlow(): void {
+    setCaptureGlow("off");
   }
 
   function resetOverlaySession(): void {
@@ -391,9 +517,11 @@ export function Overlay() {
       setMode("field");
       setPrompt("");
       setPhase("idle");
+      clearCaptureGlow();
       resetTypewriter();
       setOutputText("");
       setHasGenerated(false);
+      setLastGrounding(null);
       lastRunIdRef.current = null;
       setMenuOpen(false);
       setApplyNotice(null);
@@ -403,12 +531,13 @@ export function Overlay() {
       setWritingType("question");
       setShellVisible(false);
       setContextModalOpen(false);
-      setNewSessionPickerOpen(false);
+      setContextPanelOpen(false);
       setContextSaved(false);
       setImportPromptCopied(false);
+      setClipboardSummary(null);
+      setClipboardSummaryAdded(false);
     });
-    refreshActiveSession();
-    refreshStandingProjectContext();
+    refreshContextSnapshot();
     ackOverlayPrepared();
   }
 
@@ -421,8 +550,7 @@ export function Overlay() {
       setOverlayPlacement(s.overlayPlacement);
     })();
     // Restore the persisted active session + project context (survives app restarts).
-    void api.sessionGetActive().then(setActiveSession);
-    void api.projectContextGet().then(setStandingProjectContext);
+    refreshContextSnapshot();
 
     const applyCapture = (detail: {
       text: string;
@@ -430,7 +558,23 @@ export function Overlay() {
       snapshot: { text: string; hasText: boolean };
       terminalContext?: boolean;
       context?: CaptureContext;
+      clipboardSummary?: { scope: ContextImportScope; text: string };
     }) => {
+      // The first empty OVERLAY_SHOW is the instant shell displayed while native
+      // capture is still running. The following delivery replaces it with the
+      // actual capture, without changing any capture orchestration or timing.
+      const isWaitingForCapture =
+        !window.__promptforgeMock &&
+        captureRef.current === null &&
+        detail.text === "" &&
+        detail.mode === "field" &&
+        !detail.context;
+      // A detected summary supersedes the auto-reopen: show the toast instead of the
+      // modal (trusting the actually-detected scope). Suppress a summary the user just
+      // dismissed. If the resume flow is set but nothing matched, keep the manual reopen.
+      const summary = detail.clipboardSummary ?? null;
+      const suppressed = summary != null && summary.text === lastDismissedSummaryRef.current;
+      const showToast = summary != null && !suppressed;
       flushSync(() => {
         captureRef.current = {
           text: detail.text,
@@ -448,21 +592,23 @@ export function Overlay() {
         setSegmentMode("prompting");
         setWritingType("question");
         setPrompt(detail.text);
-        setPhase("idle");
+        setPhase(isWaitingForCapture ? "capturing" : "idle");
         resetTypewriter();
         setOutputText("");
         setHasGenerated(false);
+        setLastGrounding(null);
         lastRunIdRef.current = null;
         setMenuOpen(false);
         setApplyNotice(null);
         setShellVisible(true);
-        setContextModalOpen(resumeContextModalRef.current);
-        setNewSessionPickerOpen(false);
+        setContextModalOpen(resumeContextModalRef.current && !showToast);
+        setContextPanelOpen(false);
         setContextSaved(false);
         setImportPromptCopied(false);
+        setClipboardSummary(showToast ? summary : null);
+        setClipboardSummaryAdded(false);
       });
-      void api.sessionGetActive().then(setActiveSession);
-      void api.projectContextGet().then(setStandingProjectContext);
+      refreshContextSnapshot();
       ackOverlayPrepared();
     };
 
@@ -505,23 +651,53 @@ export function Overlay() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, [menuOpen]);
 
-  // Recent sessions for the switcher, fetched on menu open.
+  // Outside-click closes the context panel; a click on the bar itself is a toggle.
   useEffect(() => {
-    if (!menuOpen) return;
-    void api.sessionList().then(setSessions);
-  }, [menuOpen]);
+    if (!contextPanelOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (contextPanelRef.current?.contains(target)) return;
+      if (contextBarRef.current?.contains(target)) return;
+      setContextPanelOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [contextPanelOpen]);
 
-  async function onNewSession() {
-    setMenuOpen(false);
-    setPendingDeleteProject(null);
-    setNewSessionPickerOpen(true);
-    const [{ projects }, sessionList] = await Promise.all([api.projectList(), api.sessionList()]);
-    setPickerProjects(projects);
-    setSessions(sessionList);
+  // Cheap re-sync of the full context snapshot whenever a context surface opens.
+  useEffect(() => {
+    if (menuOpen || contextPanelOpen) refreshContextSnapshot();
+  }, [menuOpen, contextPanelOpen]);
+
+  // Mutual exclusion: only one of the ⋮ menu / context panel is open at a time.
+  function toggleContextPanel(): void {
+    setContextPanelOpen((v) => {
+      const next = !v;
+      if (next) setMenuOpen(false);
+      return next;
+    });
+  }
+
+  function toggleMenu(): void {
+    setMenuOpen((v) => {
+      const next = !v;
+      if (next) setContextPanelOpen(false);
+      return next;
+    });
+  }
+
+  function onBackdropPointerDown(e: ReactPointerEvent<HTMLDivElement>): void {
+    if (shellRef.current?.contains(e.target as Node)) return;
+    if (contextModalOpen) return;
+    if (contextPanelOpen) {
+      setContextPanelOpen(false);
+      return;
+    }
+    api.hideOverlay();
   }
 
   /** One-click: pick a project (or none) and start the session immediately. */
-  async function onStartNewSession(projectId: string | null) {
+  async function onNewSessionIn(projectId: string | null) {
     const session = await api.sessionCreate(projectId);
     setActiveSession(session);
     if (!projectId) {
@@ -529,25 +705,52 @@ export function Overlay() {
       setStandingProjectContext("");
       setImportedProjectContext("");
     } else {
-      const chosen = pickerProjects.find((p) => p.id === projectId);
+      const chosen = projects.find((p) => p.id === projectId);
       const activated = await api.projectSetActive(projectId);
       const text = activated?.contextText ?? chosen?.contextText ?? "";
       setStandingProjectContext(text);
       setImportedProjectContext(text);
     }
     setPendingDeleteProject(null);
-    setNewSessionPickerOpen(false);
+    refreshContextSnapshot();
   }
 
-  /** Open Import context locked to project; creates a new project + session on save. */
-  function onNewProjectFromPicker(): void {
-    setNewSessionPickerOpen(false);
+  /** Panel "+ Project": open "Bring context" locked to project; creates a new project + session on save. */
+  function onNewProject(): void {
+    setContextPanelOpen(false);
     setPendingDeleteProject(null);
     setImportPromptCopied(false);
     setContextSaved(false);
     setContextImportScope("project");
+    setImportTargetProjectId(null);
     setImportedProjectContext("");
     setNewProjectFlow(true);
+    setContextModalOpen(true);
+  }
+
+  /** Panel "Bring context": open "Bring context" locked to the active session. */
+  function onBringContext(): void {
+    setContextPanelOpen(false);
+    setPendingDeleteProject(null);
+    setImportPromptCopied(false);
+    setContextSaved(false);
+    setContextImportScope("session");
+    setImportTargetProjectId(null);
+    setNewProjectFlow(false);
+    setImportedSessionContext(activeSession?.contextText ?? "");
+    setContextModalOpen(true);
+  }
+
+  /** Panel per-project "memory": open "Bring context" locked to that project (non-active safe). */
+  function onEditProjectMemory(project: ProjectContext): void {
+    setContextPanelOpen(false);
+    setPendingDeleteProject(null);
+    setImportPromptCopied(false);
+    setContextSaved(false);
+    setContextImportScope("project");
+    setImportTargetProjectId(project.id);
+    setNewProjectFlow(false);
+    setImportedProjectContext(project.contextText);
     setContextModalOpen(true);
   }
 
@@ -555,21 +758,10 @@ export function Overlay() {
     if (!pendingDeleteProject) return;
     const id = pendingDeleteProject.id;
     await api.projectDelete(id);
-    setPickerProjects((prev) => prev.filter((p) => p.id !== id));
-    setSessions((prev) => prev.filter((s) => s.projectId !== id));
-    if (activeSession?.projectId === id) {
-      setActiveSession(await api.sessionGetActive());
-    }
     const stillActive = await api.projectContextGet();
-    setStandingProjectContext(stillActive);
     if (!stillActive.trim()) setImportedProjectContext("");
     setPendingDeleteProject(null);
-  }
-
-  async function onClearSession() {
-    if (!activeSession) return;
-    setActiveSession(await api.sessionClear(activeSession.id));
-    setMenuOpen(false);
+    refreshContextSnapshot();
   }
 
   async function onResumeSession(id: string) {
@@ -586,33 +778,41 @@ export function Overlay() {
       setImportedProjectContext("");
     }
     setMenuOpen(false);
+    refreshContextSnapshot();
   }
 
   async function onDeleteSession(id: string) {
     await api.sessionDelete(id);
-    setSessions((prev) => prev.filter((s) => s.id !== id));
     if (activeSession?.id === id) {
       setActiveSession(await api.sessionGetActive());
     }
+    refreshContextSnapshot();
   }
 
   async function onAddToContext() {
     if (contextImportScope === "project") {
-      // Clear active first so upsert creates a fresh library entry (not an overwrite).
-      if (newProjectFlow) {
-        await api.projectSetActive(null);
-      }
-      const project = await api.projectUpsertActive(importedProjectContext);
-      setStandingProjectContext(project.contextText);
-      setImportedProjectContext(project.contextText);
-      if (newProjectFlow) {
-        setActiveSession(await api.sessionCreate(project.id));
-        setNewProjectFlow(false);
+      if (importTargetProjectId && importTargetProjectId !== activeProjectId) {
+        // Editing a non-active project's memory — never touch the active pointer.
+        const updated = await api.projectSetContextById(importTargetProjectId, importedProjectContext);
+        if (updated) setImportedProjectContext(updated.contextText);
+      } else {
+        // Clear active first so upsert creates a fresh library entry (not an overwrite).
+        if (newProjectFlow) {
+          await api.projectSetActive(null);
+        }
+        const project = await api.projectUpsertActive(importedProjectContext);
+        setStandingProjectContext(project.contextText);
+        setImportedProjectContext(project.contextText);
+        if (newProjectFlow) {
+          setActiveSession(await api.sessionCreate(project.id));
+          setNewProjectFlow(false);
+        }
       }
     } else {
       const target = activeSession ?? (await api.sessionCreate());
       setActiveSession(await api.sessionSetContext(target.id, importedSessionContext));
     }
+    refreshContextSnapshot();
     setContextSaved(true);
     window.setTimeout(() => {
       setContextSaved(false);
@@ -620,12 +820,40 @@ export function Overlay() {
     }, 900);
   }
 
+  async function onConfirmClipboardSummary() {
+    if (!clipboardSummary) return;
+    const { scope, text } = clipboardSummary;
+    if (scope === "session") {
+      const target = activeSession ?? (await api.sessionCreate());
+      setActiveSession(await api.sessionSetContext(target.id, text));
+    } else {
+      const project = await api.projectUpsertActive(text);
+      setStandingProjectContext(project.contextText);
+    }
+    refreshContextSnapshot();
+    resumeContextModalRef.current = false;
+    setClipboardSummaryAdded(true);
+    window.setTimeout(() => {
+      setClipboardSummaryAdded(false);
+      setClipboardSummary(null);
+    }, 900);
+  }
+
+  function onDismissClipboardSummary() {
+    if (clipboardSummary) lastDismissedSummaryRef.current = clipboardSummary.text;
+    resumeContextModalRef.current = false;
+    setClipboardSummary(null);
+  }
+
   async function runOptimize() {
     if (!prompt.trim()) return;
+    const sessionIdForTitle = activeSession?.id;
+    const shouldTitleFromPrompt = activeSession?.title === NEW_SESSION_TITLE;
     setApplyNotice(null);
     resetTypewriter();
     setPhase("optimizing");
     setOutputText("");
+    setLastGrounding(null);
     try {
       const res = await api.optimize(
         {
@@ -645,8 +873,16 @@ export function Overlay() {
       setTarget(refined);
       await waitUntilRevealed();
       setOutputText(refined);
+      setLastGrounding(res.grounding ?? null);
       setHasGenerated(true);
       setPhase("done");
+      if (sessionIdForTitle && shouldTitleFromPrompt) {
+        const updated = await api.sessionMaybeTitleFromPrompt(sessionIdForTitle, prompt);
+        if (updated) {
+          setActiveSession(updated);
+          setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+        }
+      }
     } catch (e: any) {
       const msg = `Error: ${e?.message ?? e}`;
       setTarget(msg);
@@ -682,12 +918,6 @@ export function Overlay() {
     api.hideOverlay();
   }
 
-  function onContextImportScopeChange(scope: ContextImportScope) {
-    if (newProjectFlow || scope === contextImportScope) return;
-    setContextImportScope(scope);
-    setImportPromptCopied(false);
-  }
-
   async function onPlacementChange(placement: OverlayPlacement) {
     setOverlayPlacement(placement);
     await api.setOverlayPlacement(placement);
@@ -701,10 +931,29 @@ export function Overlay() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const { mode: m, phase: p, captureFailed: failed } = keyStateRef.current;
+      const {
+        mode: m,
+        phase: p,
+        captureFailed: failed,
+        panelOpen,
+        modalOpen,
+        newProjectFlow: modalFromNewProject,
+      } = keyStateRef.current;
       const tag = (e.target as HTMLElement).tagName;
       const inEditable = tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT";
-      if (e.key === "Escape") api.hideOverlay();
+      if (e.key === "Escape") {
+        // Close the topmost surface first (panel/import modal), then the overlay.
+        if (modalOpen) {
+          closeContextModal({ returnToContextPanel: modalFromNewProject });
+          return;
+        }
+        if (panelOpen) {
+          setContextPanelOpen(false);
+          return;
+        }
+        api.hideOverlay();
+        return;
+      }
       if (
         !inEditable &&
         (m === "field" || m === "terminal" || m === "empty") &&
@@ -726,9 +975,32 @@ export function Overlay() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // The bar names the active session, so its project is the truthful lookup key;
+  // fall back to the standalone active project only when no session is active.
+  const activeProject = activeSession?.projectId
+    ? projects.find((p) => p.id === activeSession.projectId) ?? null
+    : activeProjectId
+      ? projects.find((p) => p.id === activeProjectId) ?? null
+      : null;
+
+  // Names the locked scope target in the import modal's pill-as-label.
+  const lockedScopeDetail =
+    contextImportScope === "session"
+      ? activeSession?.title ?? NEW_SESSION_TITLE
+      : newProjectFlow
+        ? "New project"
+        : (importTargetProjectId
+            ? projects.find((p) => p.id === importTargetProjectId)?.title
+            : activeProject?.title) ?? "Project";
+
   const busy = phase === "optimizing" || isRevealing;
   const capturing = phase === "capturing";
+  const captureGlowOn = captureGlow === "active";
   const captureFailed = mode === "empty";
+
+  useEffect(() => {
+    setCaptureGlow(capturing ? "active" : "off");
+  }, [capturing]);
   const canRefine = !capturing && !!prompt.trim() && !busy;
   const showOutput = busy || phase === "done" || phase === "error";
   const outputValue = busy ? displayed : outputText;
@@ -738,11 +1010,9 @@ export function Overlay() {
   const modelLabel = MODELS.find((m) => m.id === model)?.label ?? model;
   const controlsDisabled = capturing || busy;
 
-  const outputPlaceholder = capturing
-    ? "Capturing…"
-    : busy
-      ? "Refining…"
-      : contextStatusPlaceholder(activeSession, Boolean(standingProjectContext.trim()));
+  const outputPlaceholder = busy
+    ? "Refining…"
+    : contextStatusPlaceholder(activeSession, Boolean(standingProjectContext.trim()));
 
   const keyMissingError = phase === "error" && outputText.includes("API key not configured");
   const phaseAnnouncement = capturing
@@ -761,11 +1031,14 @@ export function Overlay() {
   }, [displayed, busy]);
 
   return (
-    <div className="overlay-font w-full h-full flex items-center justify-center px-12">
+    <div
+      className="overlay-font w-full h-full flex items-center justify-center px-4 py-4"
+      onPointerDown={onBackdropPointerDown}
+    >
       <div className="sr-only" aria-live="polite">
         {phaseAnnouncement}
       </div>
-      <div className={`relative w-full max-w-[578px] ${shellVisible ? "" : "invisible"}`}>
+      <div ref={shellRef} className={`relative w-full max-w-[578px] ${shellVisible ? "" : "invisible"}`}>
         {/* Folder tabs — tucked behind the card (z-0 under the card's z-10) for depth. */}
         <div
           className="apple-glass-tab apple-glass-tab--left -left-[26px] top-1/2 -translate-y-1/2 w-[36px] h-[158px] flex items-center justify-start pl-[7px]"
@@ -775,136 +1048,44 @@ export function Overlay() {
             PromptForge
           </span>
         </div>
-        <div ref={menuRef} className="absolute -right-[26px] top-6 z-20">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            className="p-0 rounded-full text-white/80 hover:text-white hover:bg-white/20 transition"
-            aria-label="More options"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-          >
-            <MoreIcon />
-          </button>
-          {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 flex items-start gap-2">
-              <div className="flex flex-col gap-2 shrink-0 w-[168px]">
-                <button
-                  type="button"
-                  onClick={() => void onNewSession()}
-                  className="apple-glass-menu w-full rounded-xl py-2 px-3 text-sm text-center text-white hover:bg-white/10"
-                >
-                  + New session
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void onClearSession()}
-                  disabled={!activeSession?.contextText.trim()}
-                  className="apple-glass-menu w-full rounded-xl py-2 px-3 text-sm text-center text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Clear session
-                </button>
-                {sessions.length > 0 && (
-                  <div className="apple-glass-menu w-full rounded-xl py-1 text-white">
-                    <div className="px-3 pt-1 pb-1 text-[10px] uppercase tracking-wider text-white/50">
-                      Sessions
-                    </div>
-                    {sessions.slice(0, 5).map((s) => (
-                      <div key={s.id} className="flex items-center gap-0.5 pr-1">
-                        <button
-                          type="button"
-                          onClick={() => void onResumeSession(s.id)}
-                          className={`min-w-0 flex-1 text-left px-3 py-1.5 text-[13px] truncate hover:bg-white/10 ${
-                            s.id === activeSession?.id ? "text-white" : "text-white/60"
-                          }`}
-                          title={s.title}
-                        >
-                          {s.id === activeSession?.id ? "• " : ""}
-                          {s.title}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void onDeleteSession(s.id);
-                          }}
-                          className="shrink-0 p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition"
-                          aria-label="Delete session"
-                          title="Delete session"
-                        >
-                          <TrashIcon />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="apple-glass-menu min-w-[180px] rounded-xl py-2 text-white">
-              <div className="px-3 pb-2">
-                <div className="text-[10px] uppercase tracking-wider text-white/50 mb-2">Position</div>
-                <OverlayPlacementPicker value={overlayPlacement} onChange={onPlacementChange} />
-              </div>
-              <div className="border-t border-white/10 my-1" />
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setImportPromptCopied(false);
-                  setContextSaved(false);
-                  setNewProjectFlow(false);
-                  setContextImportScope("session");
-                  // Prefill from the store so the modal doubles as the editor.
-                  setImportedSessionContext(activeSession?.contextText ?? "");
-                  setImportedProjectContext(standingProjectContext);
-                  void api.projectContextGet().then((text) => {
-                    setStandingProjectContext(text);
-                    setImportedProjectContext(text);
-                  });
-                  setContextModalOpen(true);
-                }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
-              >
-                Configure context
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  api.openSettings();
-                }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
-              >
-                Settings
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuOpen(false);
-                  api.openStudioWorkbench({
-                    originalText: prompt,
-                    optimizedText: outputText.trim() ? outputText : undefined,
-                    model,
-                    level,
-                  });
-                }}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
-              >
-                Open in Studio
-              </button>
-              <button
-                type="button"
-                onClick={() => api.hideOverlay()}
-                className="w-full text-left px-3 py-2 text-sm text-white/70 hover:bg-white/10"
-              >
-                Dismiss
-              </button>
-              </div>
-            </div>
-          )}
-        </div>
 
-        <div className="apple-glass relative z-10 rounded-[34px] w-full p-4 text-white">
+        {contextPanelOpen && (
+          <ContextPanel
+            panelRef={contextPanelRef}
+            projects={projects}
+            sessions={sessions}
+            activeSessionId={activeSession?.id ?? null}
+            pendingDeleteProject={pendingDeleteProject}
+            onResumeSession={(id) => void onResumeSession(id)}
+            onDeleteSession={(id) => void onDeleteSession(id)}
+            onNewSessionIn={(projectId) => void onNewSessionIn(projectId)}
+            onRequestDeleteProject={setPendingDeleteProject}
+            onConfirmDeleteProject={() => void onConfirmDeleteProject()}
+            onNewProject={onNewProject}
+            onBringContext={onBringContext}
+            onEditProjectMemory={onEditProjectMemory}
+            onClose={() => setContextPanelOpen(false)}
+          />
+        )}
+
+        {captureGlowOn && (
+          <div aria-hidden className="apple-glass-capture-aura" />
+        )}
+        <div
+          className={`apple-glass relative z-10 rounded-[34px] w-full p-4 text-white${
+            captureGlowOn ? " apple-glass--capture-wait" : ""
+          }`}
+        >
           <>
+            <div ref={contextBarRef}>
+              <ContextBar
+                project={activeProject}
+                session={activeSession}
+                open={contextPanelOpen}
+                onClick={toggleContextPanel}
+                disabled={capturing}
+              />
+            </div>
             <div className="flex gap-4 mb-4 items-start">
               <div className="flex-1 flex flex-col gap-3">
                 <div className="apple-glass-panel rounded-[26px] h-[88px] overflow-hidden">
@@ -1000,181 +1181,167 @@ export function Overlay() {
                 <GlassPill onClick={onApply} disabled={!canApply}>
                   Apply
                 </GlassPill>
-                <GlassPill onClick={() => void onCopy()} disabled={!canCopy}>
-                  Copy
-                </GlassPill>
+                <div ref={copyAnchorRef} className="relative shrink-0">
+                  <GlassPill onClick={() => void onCopy()} disabled={!canCopy}>
+                    Copy
+                  </GlassPill>
+                </div>
               </div>
+            </div>
+
+            {/* Fixed min-height so the card never jumps when chips appear post-refine. */}
+            <div className="min-h-[20px] mt-2 px-1 flex items-center gap-1.5 flex-wrap text-[11px] text-white/40">
+              {phase === "done" &&
+                lastGrounding &&
+                (() => {
+                  const chips: string[] = [];
+                  if (lastGrounding.session) chips.push("Session");
+                  if (lastGrounding.project) chips.push("Project");
+                  if (lastGrounding.destination) {
+                    const d = lastGrounding.destination;
+                    chips.push(`${d.app}${d.detail ? ` · ${d.detail}` : ""}`);
+                  }
+                  if (chips.length === 0) {
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setContextPanelOpen(true)}
+                        className="rounded-full border border-white/10 bg-white/5 px-2 py-px text-white/50 hover:text-white/70 transition"
+                      >
+                        No context
+                      </button>
+                    );
+                  }
+                  return (
+                    <>
+                      <span>Grounded by</span>
+                      {chips.map((chip) => (
+                        <span
+                          key={chip}
+                          className="rounded-full border border-white/10 bg-white/5 px-2 py-px text-white/70"
+                        >
+                          {chip}
+                        </span>
+                      ))}
+                    </>
+                  );
+                })()}
             </div>
           </>
         </div>
-      </div>
 
-      {newSessionPickerOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center px-6"
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) {
-              setPendingDeleteProject(null);
-              setNewSessionPickerOpen(false);
-            }
-          }}
-        >
-          <div className="apple-glass-menu relative w-full max-w-[360px] rounded-[24px] p-5 text-white">
-            {pendingDeleteProject ? (
-              <>
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <h2 className="text-[16px] font-medium">Delete project?</h2>
-                  <button
-                    type="button"
-                    onClick={() => setPendingDeleteProject(null)}
-                    className="text-white/50 hover:text-white transition shrink-0"
-                    aria-label="Close"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
-                    </svg>
-                  </button>
-                </div>
-                <p className="text-[13px] text-white/70 mb-1 leading-relaxed">
-                  <span className="text-white">{pendingDeleteProject.title}</span> will be permanently
-                  removed.
-                </p>
-                {(() => {
-                  const linkedCount = sessions.filter(
-                    (s) => s.projectId === pendingDeleteProject.id,
-                  ).length;
-                  return linkedCount > 0 ? (
-                    <p className="text-[13px] text-white/55 mb-4 leading-relaxed">
-                      This also deletes {linkedCount} linked session
-                      {linkedCount === 1 ? "" : "s"}.
-                    </p>
-                  ) : (
-                    <p className="text-[13px] text-white/55 mb-4 leading-relaxed">
-                      No linked sessions will be affected.
-                    </p>
-                  );
-                })()}
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPendingDeleteProject(null)}
-                    className="rounded-xl px-3.5 py-2 text-[13px] text-white/70 hover:bg-white/10 transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void onConfirmDeleteProject()}
-                    className="rounded-xl px-3.5 py-2 text-[13px] bg-white/15 hover:bg-white/25 text-white transition"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <h2 className="text-[16px] font-medium">Start with project context?</h2>
-              <button
-                type="button"
-                onClick={() => setNewSessionPickerOpen(false)}
-                className="text-white/50 hover:text-white transition shrink-0"
-                aria-label="Close"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-            <div
-              className="mb-1 max-h-[200px] overflow-y-auto scroll-thin rounded-xl border border-white/10 bg-black/30 p-1 space-y-1"
-              role="listbox"
-              aria-label="Project"
+        {menuPos && (
+          <div
+            ref={menuRef}
+            className="absolute z-40 pointer-events-auto"
+            style={{ top: menuPos.top, left: menuPos.left, transform: "translateX(-50%)" }}
+          >
+            <button
+              type="button"
+              onClick={toggleMenu}
+              className="inline-flex items-center gap-1 px-2 py-1 min-h-[28px] rounded-full text-white/80 hover:text-white hover:bg-white/20 transition whitespace-nowrap"
+              aria-label="Menu"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
             >
-              <button
-                type="button"
-                role="option"
-                onClick={() => void onStartNewSession(null)}
-                className="w-full text-left rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-[13px] transition text-white/55 hover:bg-white/15 hover:border-white/20 hover:text-white/75"
-              >
-                No project
-              </button>
-              <button
-                type="button"
-                role="option"
-                onClick={onNewProjectFromPicker}
-                className="w-full text-left rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-[13px] transition text-white/55 hover:bg-white/15 hover:border-white/20 hover:text-white/75"
-              >
-                + New Project
-              </button>
-              {pickerProjects.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center gap-0.5 rounded-lg border transition"
-                  style={{
-                    borderColor: `${p.color}66`,
-                    backgroundColor: `${p.color}22`,
-                  }}
-                >
-                  <span
-                    className="ml-2 h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: p.color }}
-                    aria-hidden
-                  />
+              <MenuLinesIcon />
+              <span className="text-[10px] uppercase font-medium text-white/55 select-none pointer-events-none">
+                menu
+              </span>
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 bottom-full mb-1 z-50">
+                <div className="apple-glass-menu min-w-[180px] rounded-xl py-2 text-white shadow-[0_12px_32px_rgba(0,0,0,0.4)]">
+                  <div className="px-3 pb-2">
+                    <div className="text-[10px] uppercase tracking-wider text-white/50 mb-2">Position</div>
+                    <OverlayPlacementPicker value={overlayPlacement} onChange={onPlacementChange} />
+                  </div>
+                  <div className="border-t border-white/10 my-1" />
                   <button
                     type="button"
-                    role="option"
-                    onClick={() => void onStartNewSession(p.id)}
-                    className="min-w-0 flex-1 text-left rounded-lg px-2.5 py-2 text-[13px] transition truncate text-white/80 hover:bg-white/10 hover:text-white"
-                    title={p.title}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      api.openSettings();
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
                   >
-                    {p.title}
+                    Settings
                   </button>
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPendingDeleteProject(p);
+                    onClick={() => {
+                      setMenuOpen(false);
+                      api.openStudioWorkbench({
+                        originalText: prompt,
+                        optimizedText: outputText.trim() ? outputText : undefined,
+                        model,
+                        level,
+                      });
                     }}
-                    className="shrink-0 p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/10 transition"
-                    aria-label={`Delete project ${p.title}`}
-                    title="Delete project"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
                   >
-                    <TrashIcon />
+                    Open in Studio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => api.hideOverlay()}
+                    className="w-full text-left px-3 py-2 text-sm text-white/70 hover:bg-white/10"
+                  >
+                    Dismiss
                   </button>
                 </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-end">
-              <button
-                type="button"
-                onClick={() => setNewSessionPickerOpen(false)}
-                className="rounded-xl px-3.5 py-2 text-[13px] text-white/70 hover:bg-white/10 transition"
-              >
-                Cancel
-              </button>
-            </div>
-              </>
+              </div>
             )}
           </div>
-        </div>
-      )}
+        )}
+
+        {clipboardSummary && (
+          <div
+            className="absolute left-1/2 -translate-x-1/2 -bottom-12 z-30 apple-glass-menu rounded-full flex items-center gap-2 pl-4 pr-2 py-1.5 text-[13px] text-white whitespace-nowrap"
+            role="status"
+          >
+            <span className="text-white/70">Summary found on clipboard</span>
+            <button
+              type="button"
+              onClick={() => void onConfirmClipboardSummary()}
+              disabled={clipboardSummaryAdded}
+              className="rounded-full px-3 py-1 text-[12px] font-medium bg-white/20 hover:bg-white/30 text-white transition disabled:opacity-100"
+            >
+              {clipboardSummaryAdded
+                ? "Added ✓"
+                : clipboardSummary.scope === "project"
+                  ? "Add to project memory"
+                  : "Add to this session"}
+            </button>
+            <button
+              type="button"
+              onClick={onDismissClipboardSummary}
+              className="shrink-0 p-1 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition"
+              aria-label="Dismiss"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )}
+      </div>
 
       {contextModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center px-6"
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) {
-              closeContextModal({ returnToSessionPicker: newProjectFlow });
+              closeContextModal({ returnToContextPanel: newProjectFlow });
             }
           }}
         >
           <div className="apple-glass-menu relative w-full max-w-[480px] rounded-[24px] p-5 text-white">
             <div className="flex items-center justify-between gap-3 mb-4">
-              <h2 className="text-[16px] font-medium">Import context to ANVYL.ai</h2>
+              <h2 className="text-[16px] font-medium">Bring context from your chat</h2>
               <button
                 type="button"
-                onClick={() => closeContextModal({ returnToSessionPicker: newProjectFlow })}
+                onClick={() => closeContextModal({ returnToContextPanel: newProjectFlow })}
                 className="text-white/50 hover:text-white transition shrink-0"
                 aria-label="Close"
               >
@@ -1196,7 +1363,8 @@ export function Overlay() {
                     1
                   </span>
                   <span className="text-[13px] text-white/80">
-                    Copy this prompt into a chat with your other AI provider
+                    Copy this prompt into your AI chat — your refinements will understand that
+                    conversation.
                   </span>
                 </div>
                 <div className="relative mx-3 rounded-xl bg-black/25 border border-white/10">
@@ -1220,8 +1388,8 @@ export function Overlay() {
                   </span>
                   <span className="text-[13px] text-white/80">
                     {contextImportScope === "project"
-                      ? "Paste results below to add to the Project's context"
-                      : "Paste results below to add to the Session's context"}
+                      ? "Paste the answer below — it becomes this project's memory"
+                      : "Paste the answer below — it becomes this session's memory"}
                   </span>
                 </div>
                 <div className="mx-3">
@@ -1245,15 +1413,16 @@ export function Overlay() {
               <div className="translate-y-[2px]">
                 <ContextScopePill
                   value={contextImportScope}
-                  onChange={onContextImportScopeChange}
+                  onChange={() => {}}
                   sessionConfigured={Boolean(importedSessionContext.trim())}
                   projectConfigured={Boolean(importedProjectContext.trim())}
-                  lockedScope={newProjectFlow ? "project" : undefined}
+                  lockedScope={contextImportScope}
+                  lockedLabelDetail={lockedScopeDetail}
                 />
               </div>
               <button
                 type="button"
-                onClick={() => closeContextModal({ returnToSessionPicker: newProjectFlow })}
+                onClick={() => closeContextModal({ returnToContextPanel: newProjectFlow })}
                 className="rounded-xl px-3.5 py-2 text-[13px] text-white/70 hover:bg-white/10 transition"
               >
                 Cancel

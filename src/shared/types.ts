@@ -33,7 +33,7 @@ export const REWRITE_CONFIG = {
   provider: "openai" as const,
   modelId: "gpt-4.1",
   label: "GPT-4.1",
-  /** Fixed optimal temperature — never varies by level or user setting. */
+  /** Fixed optimal temperature â€” never varies by level or user setting. */
   temperature: 0.3,
 } as const;
 
@@ -45,7 +45,7 @@ export const LEVEL_LABELS: Record<OptLevel, string> = {
   4: "Max",
 };
 
-/** Level recognition colors — identical on every surface (overlay slider label, Studio segments). */
+/** Level recognition colors â€” identical on every surface (overlay slider label, Studio segments). */
 export const LEVEL_COLORS: Record<OptLevel, string> = {
   1: "#5AC8FA",
   2: "#FFD60A",
@@ -69,7 +69,7 @@ export const CONTEXT_CAPS = {
   files: 10,
 } as const;
 
-/** Destination app category — used for destination context labeling. */
+/** Destination app category â€” used for destination context labeling. */
 export type AppCategory =
   | "ai-chat"
   | "code-editor"
@@ -128,20 +128,20 @@ export interface CaptureContext {
     activeFile?: string;
     recentFiles?: string[];
   };
-  /** UI preselect only — never rendered into the meta-prompt block. */
+  /** UI preselect only â€” never rendered into the meta-prompt block. */
   suggestedModel?: ModelId;
 }
 
 /**
  * Overlay writing mode deliverable. When set on a request the output is the
- * final written text itself (an email, chat message, …) — not a refined prompt.
+ * final written text itself (an email, chat message, â€¦) â€” not a refined prompt.
  */
 export type WritingType = "question" | "email" | "message" | "explain";
 
 export const WRITING_TYPES: WritingType[] = ["question", "email", "message", "explain"];
 
 /**
- * L1–L4 slider labels per writing type (colors stay Cool→Max). Single source of
+ * L1â€“L4 slider labels per writing type (colors stay Coolâ†’Max). Single source of
  * truth: the overlay slider shows these AND the engine derives its tone
  * instructions from the same names.
  */
@@ -234,7 +234,7 @@ export interface LibraryItem {
   updatedAt: number;
 }
 
-/** @deprecated Pre–run-ledger history row; migrated to RunRecord on load. */
+/** @deprecated Preâ€“run-ledger history row; migrated to RunRecord on load. */
 export interface HistoryItem {
   id: string;
   originalText: string;
@@ -305,9 +305,21 @@ export interface RunRecord {
   comments: RunComment[];
 }
 
+/** Which context layers were attached to an optimize request (UI grounding chips). */
+export interface OptimizeGrounding {
+  session: boolean;
+  project: boolean;
+  destination?: {
+    app: string;
+    detail?: string;
+  };
+}
+
 /** Optimize result returned to the renderer, with the persisted run id. */
 export interface OptimizeWithRunId extends OptimizeResult {
   runId: string;
+  /** Context layers attached to this run (UI grounding chips); UI-only, never persisted. */
+  grounding?: OptimizeGrounding;
 }
 
 export interface HistoryFinalizeRequest {
@@ -391,7 +403,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 /** Result of persisting settings; `ok` is false only when the hotkey was rejected and reverted. */
 export interface SettingsSetResult {
   ok: boolean;
-  /** What was actually persisted — the hotkey may have been normalized or reverted. */
+  /** What was actually persisted â€” the hotkey may have been normalized or reverted. */
   settings: AppSettings;
   hotkeyError?: string;
   hotkeyActive: boolean;
@@ -451,10 +463,12 @@ export const IPC = {
   SESSION_DELETE: "promptforge:session:delete",
   SESSION_SET_ACTIVE: "promptforge:session:set-active",
   SESSION_GET_ACTIVE: "promptforge:session:get-active",
+  SESSION_MAYBE_TITLE_FROM_PROMPT: "promptforge:session:maybe-title-from-prompt",
   PROJECT_CONTEXT_GET: "promptforge:project-context:get",
   PROJECT_CONTEXT_SET: "promptforge:project-context:set",
   PROJECT_LIST: "promptforge:project:list",
   PROJECT_UPSERT_ACTIVE: "promptforge:project:upsert-active",
+  PROJECT_SET_CONTEXT_BY_ID: "promptforge:project:set-context-by-id",
   PROJECT_SET_ACTIVE: "promptforge:project:set-active",
   PROJECT_DELETE: "promptforge:project:delete",
   OVERLAY_SHOW: "promptforge:overlay:show",

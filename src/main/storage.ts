@@ -28,6 +28,7 @@ import {
   clampContextText,
   deriveProjectTitle,
   deriveSessionTitle,
+  deriveSessionTitleFromPrompt,
   NEW_SESSION_TITLE,
   PROJECT_CONTEXT_MAX_CHARS,
   PROJECTS_MAX,
@@ -522,6 +523,19 @@ export function setSessionContext(id: string, text: string): SessionContext | nu
   return session;
 }
 
+/** Titles a placeholder session from the first Refine draft; no-op if already named. */
+export function maybeTitleSessionFromPrompt(id: string, prompt: string): SessionContext | null {
+  const d = load();
+  const session = d.sessions.find((s) => s.id === id);
+  if (!session || session.title !== NEW_SESSION_TITLE) return session ?? null;
+  const title = deriveSessionTitleFromPrompt(prompt);
+  if (title === NEW_SESSION_TITLE) return session;
+  session.title = title;
+  session.updatedAt = Date.now();
+  persist();
+  return session;
+}
+
 /** Clears a session's context but keeps the session resumable (title/timeline intact). */
 export function clearSessionContext(id: string): SessionContext | null {
   const d = load();
@@ -621,6 +635,29 @@ export function upsertActiveProject(text: string): ProjectContext {
     if (!evictable) break;
     d.projects = d.projects.filter((p) => p.id !== evictable.id);
     removeSessionsForProject(d, evictable.id);
+  }
+  persist();
+  return project;
+}
+
+/**
+ * Write imported text onto a specific library project by id, without touching
+ * the active project pointer (used by the panel's per-project "memory" editor).
+ * Clamps the text, re-derives the title only when it is still the dated default,
+ * bumps updatedAt, and keeps projectContext in sync only if that id is active.
+ */
+export function setProjectContextById(id: string, text: string): ProjectContext | null {
+  const d = load();
+  const project = d.projects.find((p) => p.id === id);
+  if (!project) return null;
+  project.contextText = clampContextText(text, PROJECT_CONTEXT_MAX_CHARS);
+  const defaultTitle = `Project ${new Date(project.createdAt).toLocaleDateString()}`;
+  if (!project.title.trim() || project.title === defaultTitle) {
+    project.title = deriveProjectTitle(project.contextText, project.createdAt);
+  }
+  project.updatedAt = Date.now();
+  if (d.activeProjectId === id) {
+    d.projectContext = project.contextText;
   }
   persist();
   return project;

@@ -121,6 +121,23 @@ export function deriveSessionTitle(contextText: string, createdAt: number): stri
 }
 
 /**
+ * Session title from the first Refine draft. Uses the first non-empty line;
+ * keeps NEW_SESSION_TITLE when the prompt is empty.
+ */
+export function deriveSessionTitleFromPrompt(prompt: string): string {
+  const trimmed = prompt.trim();
+  if (!trimmed) return NEW_SESSION_TITLE;
+  const firstLine =
+    trimmed
+      .split("\n")
+      .map((l) => l.trim())
+      .find(Boolean) ?? "";
+  if (!firstLine) return NEW_SESSION_TITLE;
+  if (firstLine.length <= TITLE_MAX_CHARS) return firstLine;
+  return `${firstLine.slice(0, TITLE_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+/**
  * Project title from imported context. The project import prompt's first section
  * is "1. PROJECT — …" (contextImportPrompt.ts); same fallbacks as sessions.
  */
@@ -131,6 +148,32 @@ export function deriveProjectTitle(contextText: string, createdAt: number): stri
     (ts) => `Project ${new Date(ts).toLocaleDateString()}`,
     createdAt,
   );
+}
+
+/**
+ * Groups sessions under their project for the unified context panel tree.
+ * Callers pass projects in display order (listProjects) and sessions in recency
+ * order (sessionList); both orders are preserved. A trailing "No project" group
+ * is always present (even when empty) so unlinked work has a home, and sessions
+ * whose projectId points at a deleted project fall into it. Empty projects still
+ * render so they can be opened.
+ */
+export function groupSessionsByProject(
+  sessions: SessionContext[],
+  projects: ProjectContext[],
+): { project: ProjectContext | null; sessions: SessionContext[] }[] {
+  const projectIds = new Set(projects.map((p) => p.id));
+  const groups: { project: ProjectContext | null; sessions: SessionContext[] }[] = projects.map(
+    (project) => ({
+      project,
+      sessions: sessions.filter((s) => s.projectId === project.id),
+    }),
+  );
+  groups.push({
+    project: null,
+    sessions: sessions.filter((s) => s.projectId == null || !projectIds.has(s.projectId)),
+  });
+  return groups;
 }
 
 /**

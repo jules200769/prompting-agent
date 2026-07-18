@@ -4,6 +4,29 @@
 
 export type ContextImportScope = "session" | "project";
 
+/**
+ * The six numbered section labels each import prompt asks the external AI to
+ * emit, in order. Single source of truth — mirrored by the prompt bodies below
+ * and consumed by contextSummaryDetect to recognize a pasted-back summary.
+ */
+export const SESSION_SUMMARY_LABELS = [
+  "GOAL",
+  "CURRENT STATE",
+  "KEY FACTS & DECISIONS",
+  "CONSTRAINTS & PREFERENCES",
+  "TERMINOLOGY & NAMES",
+  "OPEN ITEMS",
+] as const;
+
+export const PROJECT_SUMMARY_LABELS = [
+  "PROJECT",
+  "STACK & ARCHITECTURE",
+  "CONVENTIONS",
+  "KEY FACTS & DECISIONS",
+  "CONSTRAINTS & PREFERENCES",
+  "TERMINOLOGY & NAMES",
+] as const;
+
 export const CONTEXT_IMPORT_PROMPT = `You are helping me export the context of this chat session so another tool (ANVYL.ai, a prompt-refinement assistant) can use it as background knowledge when improving my future prompts for this same session.
 
 Summarize the working context of this conversation. Follow these rules exactly.

@@ -67,6 +67,91 @@ body {
     inset 0 -1px 0 rgba(255, 255, 255, 0.06);
 }
 
+/* Capture-wait: thin spectral border (internal) + soft outer aura (external).
+   Both share the same 2.2s pulse clock. */
+.apple-glass-capture-aura {
+  position: absolute;
+  inset: 0;
+  border-radius: 34px;
+  pointer-events: none;
+  z-index: 9;
+  opacity: 1;
+  box-shadow:
+    0 0 4px rgba(124, 108, 255, 0.32),
+    0 0 1px rgba(157, 146, 255, 0.65);
+  animation: capture-aura-pulse 2.2s ease-in-out infinite;
+  will-change: box-shadow;
+}
+
+.apple-glass--capture-wait {
+  border-color: transparent;
+  background:
+    linear-gradient(
+      145deg,
+      rgba(52, 52, 62, 0.92) 0%,
+      rgba(36, 36, 44, 0.9) 42%,
+      rgba(22, 22, 28, 0.94) 100%
+    ) padding-box,
+    linear-gradient(
+      110deg,
+      rgba(157, 146, 255, 1),
+      rgba(105, 214, 255, 0.95),
+      rgba(255, 255, 255, 0.85),
+      rgba(124, 108, 255, 1),
+      rgba(157, 146, 255, 1)
+    ) border-box;
+  background-size: 100% 100%, 280% 280%;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.48),
+    0 6px 18px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+  animation: capture-border-glow 2.2s ease-in-out infinite;
+  will-change: background-position;
+}
+
+@keyframes capture-border-glow {
+  0%,
+  100% {
+    background-position: 0 0, 0% 50%;
+  }
+  50% {
+    background-position: 0 0, 100% 50%;
+  }
+}
+
+@keyframes capture-aura-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 4px rgba(124, 108, 255, 0.32),
+      0 0 1px rgba(157, 146, 255, 0.65);
+  }
+  50% {
+    box-shadow:
+      0 0 7px rgba(105, 214, 255, 0.45),
+      0 0 1px rgba(157, 146, 255, 0.8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apple-glass--capture-wait,
+  .apple-glass-capture-aura {
+    animation: none;
+    will-change: auto;
+  }
+
+  .apple-glass--capture-wait {
+    background-position: 0 0, 50% 50%;
+  }
+
+  .apple-glass-capture-aura {
+    box-shadow:
+      0 0 4px rgba(124, 108, 255, 0.32),
+      0 0 1px rgba(157, 146, 255, 0.65);
+  }
+}
+
 .apple-glass::before {
   content: "";
   position: absolute;

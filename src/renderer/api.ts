@@ -14,11 +14,13 @@ import {
   type SettingsSetResult,
 } from "../shared/types";
 import { devBridgeOptimize, devBridgeSettingsGet } from "./devBridgeClient";
+import type { ContextImportScope } from "../shared/contextImportPrompt";
 import {
   assignProjectColor,
   clampContextText,
   deriveProjectTitle,
   deriveSessionTitle,
+  deriveSessionTitleFromPrompt,
   NEW_SESSION_TITLE,
   PROJECT_CONTEXT_MAX_CHARS,
   PROJECTS_MAX,
@@ -41,6 +43,8 @@ type OverlayShowPayload = {
   terminalContext?: boolean;
   /** Dev bridge / browser mock never seed destination context. */
   context?: CaptureContext;
+  /** ANVYL summary detected on the clipboard at delivery — drives the consent toast. */
+  clipboardSummary?: { scope: ContextImportScope; text: string };
 };
 
 /**
@@ -213,6 +217,15 @@ function createBrowserMock(): PromptForgeAPI {
       return session;
     },
     sessionGetActive: async () => mockSessions.find((s) => s.id === mockActiveSessionId) ?? null,
+    sessionMaybeTitleFromPrompt: async (id: string, prompt: string) => {
+      const session = mockSessions.find((s) => s.id === id);
+      if (!session || session.title !== NEW_SESSION_TITLE) return session ?? null;
+      const title = deriveSessionTitleFromPrompt(prompt);
+      if (title === NEW_SESSION_TITLE) return session;
+      session.title = title;
+      session.updatedAt = Date.now();
+      return session;
+    },
     projectContextGet: async () => mockProjectContext,
     projectContextSet: async (text: string) => {
       mockProjectContext = clampContextText(text, PROJECT_CONTEXT_MAX_CHARS);
@@ -249,6 +262,18 @@ function createBrowserMock(): PromptForgeAPI {
       }
       mockProjectContext = clamped;
       mockEvictProjects();
+      return project;
+    },
+    projectSetContextById: async (id: string, text: string) => {
+      const project = mockProjects.find((p) => p.id === id);
+      if (!project) return null;
+      project.contextText = clampContextText(text, PROJECT_CONTEXT_MAX_CHARS);
+      const defaultTitle = `Project ${new Date(project.createdAt).toLocaleDateString()}`;
+      if (!project.title.trim() || project.title === defaultTitle) {
+        project.title = deriveProjectTitle(project.contextText, project.createdAt);
+      }
+      project.updatedAt = Date.now();
+      if (mockActiveProjectId === id) mockProjectContext = project.contextText;
       return project;
     },
     projectSetActive: async (id: string | null) => {

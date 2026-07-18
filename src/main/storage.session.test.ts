@@ -57,6 +57,24 @@ describe("session CRUD", () => {
     expect(store.listSessions().some((x) => x.id === s.id)).toBe(true);
   });
 
+  it("maybeTitleSessionFromPrompt titles placeholder sessions from the first prompt", () => {
+    const s = store.createSession();
+    const updated = store.maybeTitleSessionFromPrompt(s.id, "Fix the flaky deploy pipeline");
+    expect(updated?.title).toBe("Fix the flaky deploy pipeline");
+    expect(store.listSessions().find((x) => x.id === s.id)?.title).toBe("Fix the flaky deploy pipeline");
+  });
+
+  it("maybeTitleSessionFromPrompt does not overwrite an import-derived title", () => {
+    const s = store.createSession();
+    store.setSessionContext(s.id, "1. GOAL — Ship session context.");
+    const updated = store.maybeTitleSessionFromPrompt(s.id, "Some unrelated prompt");
+    expect(updated?.title).toBe("Ship session context.");
+  });
+
+  it("maybeTitleSessionFromPrompt is a no-op for unknown ids", () => {
+    expect(store.maybeTitleSessionFromPrompt("missing", "hello")).toBeNull();
+  });
+
   it("setActiveSession switches sessions and rejects unknown ids", () => {
     const a = store.createSession();
     store.createSession();
@@ -165,6 +183,42 @@ describe("project library", () => {
     expect(linked.projectId).toBe(p.id);
     const orphan = store.createSession("missing-project-id");
     expect(orphan.projectId).toBeNull();
+  });
+
+  it("setProjectContextById clamps, bumps updatedAt, and returns null for unknown ids", () => {
+    const p = store.upsertActiveProject("1. PROJECT — By-id target");
+    const before = store.listProjects().find((x) => x.id === p.id)!.updatedAt;
+    const updated = store.setProjectContextById(p.id, `1. PROJECT — New memory\n${"z".repeat(5000)}`);
+    expect(updated?.contextText.length).toBeLessThanOrEqual(SESSION_CONTEXT_MAX_CHARS);
+    expect(updated?.updatedAt).toBeGreaterThanOrEqual(before);
+    expect(store.setProjectContextById("nope", "text")).toBeNull();
+  });
+
+  it("setProjectContextById on a non-active project preserves the active pointer and its context", () => {
+    const a = store.upsertActiveProject("1. PROJECT — Alpha");
+    store.setActiveProject(null);
+    const b = store.upsertActiveProject("1. PROJECT — Beta");
+    expect(store.getActiveProjectId()).toBe(b.id);
+    store.setProjectContextById(a.id, "1. PROJECT — Alpha edited");
+    expect(store.getActiveProjectId()).toBe(b.id);
+    expect(store.getProjectContext()).toBe(b.contextText);
+    expect(store.listProjects().find((x) => x.id === a.id)?.contextText).toBe(
+      "1. PROJECT — Alpha edited",
+    );
+  });
+
+  it("setProjectContextById does not cascade-delete linked sessions", () => {
+    const p = store.upsertActiveProject("1. PROJECT — With sessions");
+    const linked = store.createSession(p.id);
+    store.setSessionContext(linked.id, "1. GOAL — Linked work");
+    store.setProjectContextById(p.id, "1. PROJECT — Edited memory");
+    expect(store.listSessions().some((s) => s.id === linked.id)).toBe(true);
+  });
+
+  it("setProjectContextById syncs projectContext when the id is active", () => {
+    const p = store.upsertActiveProject("1. PROJECT — Active edit");
+    store.setProjectContextById(p.id, "1. PROJECT — Active edit v2");
+    expect(store.getProjectContext()).toBe("1. PROJECT — Active edit v2");
   });
 
   it("evicts oldest projects beyond PROJECTS_MAX but never the active one", () => {

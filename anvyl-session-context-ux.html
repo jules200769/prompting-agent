@@ -1,0 +1,500 @@
+<title>ANVYL.ai — Session &amp; Context UX</title>
+<style>
+  :root {
+    --bg: #0d1015;
+    --bg-raise: #12161d;
+    --glass: rgba(255,255,255,.055);
+    --glass-strong: rgba(255,255,255,.09);
+    --line: rgba(255,255,255,.10);
+    --line-soft: rgba(255,255,255,.06);
+    --ink: rgba(255,255,255,.92);
+    --ink-2: rgba(255,255,255,.64);
+    --ink-3: rgba(255,255,255,.42);
+    --accent: #5AC8FA;
+    --pain: #FF9F0A;
+    --good: #30D158;
+    --violet: #BF5AF2;
+    --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --disp: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    --mono: "Cascadia Code", Consolas, ui-monospace, monospace;
+  }
+  /* Deliberately single-theme: the artifact lives inside the product's dark-glass world. */
+  html { color-scheme: dark; }
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(900px 420px at 15% -5%, rgba(90,200,250,.07), transparent 60%),
+      radial-gradient(700px 380px at 95% 12%, rgba(191,90,242,.05), transparent 60%);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 24px 96px; }
+
+  /* ---------- typography ---------- */
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 14px;
+  }
+  h1 {
+    font-family: var(--disp); font-size: clamp(30px, 5vw, 42px); font-weight: 650;
+    letter-spacing: -.02em; line-height: 1.12; margin: 0 0 16px; text-wrap: balance;
+  }
+  .lede { font-size: 17px; color: var(--ink-2); max-width: 60ch; margin: 0; }
+  h2 {
+    font-family: var(--disp); font-size: 22px; font-weight: 600; letter-spacing: -.01em;
+    margin: 0 0 6px; text-wrap: balance;
+  }
+  h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  p { margin: 0; }
+  .sec { margin-top: 72px; }
+  .sec-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 24px; }
+  .sec-head .eyebrow { margin-bottom: 6px; }
+  .sec-sub { color: var(--ink-2); font-size: 15px; max-width: 64ch; }
+  code, .code {
+    font-family: var(--mono); font-size: .86em;
+    background: rgba(255,255,255,.07); border-radius: 5px; padding: 1px 5px;
+    color: rgba(255,255,255,.8);
+  }
+  .ui { font-style: normal; color: var(--ink); background: rgba(255,255,255,.08); border: 1px solid var(--line-soft); border-radius: 6px; padding: 0 6px; font-size: .92em; white-space: nowrap; }
+
+  /* ---------- pain cards ---------- */
+  .pain-list { display: flex; flex-direction: column; gap: 12px; counter-reset: pain; }
+  .pain {
+    background: var(--glass); border: 1px solid var(--line-soft); border-radius: 14px;
+    padding: 18px 20px 18px 18px; display: grid; grid-template-columns: 30px 1fr; gap: 14px;
+  }
+  .pain::before {
+    counter-increment: pain; content: counter(pain);
+    width: 26px; height: 26px; border-radius: 8px; margin-top: 1px;
+    background: rgba(255,159,10,.14); color: var(--pain); border: 1px solid rgba(255,159,10,.3);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 13px;
+  }
+  .pain p { color: var(--ink-2); font-size: 14px; margin-top: 3px; }
+  .pain .quote {
+    margin-top: 10px; font-size: 13px; color: var(--pain);
+    border-left: 2px solid rgba(255,159,10,.4); padding-left: 10px; font-style: italic;
+  }
+
+  /* ---------- layer diagram ---------- */
+  .layers { display: flex; flex-direction: column; gap: 10px; }
+  .layer {
+    border-radius: 14px; border: 1px solid var(--line-soft); background: var(--glass);
+    padding: 16px 18px; display: grid; grid-template-columns: 130px 1fr; gap: 18px; align-items: start;
+  }
+  .layer .tag {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 99px; justify-self: start; margin-top: 2px; white-space: nowrap;
+  }
+  .layer.l-auto .tag { color: var(--ink-3); background: rgba(255,255,255,.06); border: 1px solid var(--line-soft); }
+  .layer.l-sess .tag { color: var(--accent); background: rgba(90,200,250,.1); border: 1px solid rgba(90,200,250,.3); }
+  .layer.l-proj .tag { color: var(--violet); background: rgba(191,90,242,.1); border: 1px solid rgba(191,90,242,.3); }
+  .layer p { color: var(--ink-2); font-size: 14px; }
+  .layer .rename { margin-top: 6px; font-size: 13px; color: var(--good); }
+  @media (max-width: 620px) { .layer { grid-template-columns: 1fr; gap: 8px; } .pain { grid-template-columns: 24px 1fr; gap: 10px; } }
+
+  /* ---------- principles ---------- */
+  .prin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .prin {
+    background: var(--glass); border: 1px solid var(--line-soft); border-radius: 14px; padding: 18px;
+  }
+  .prin .k { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; color: var(--good); text-transform: uppercase; display: block; margin-bottom: 8px; }
+  .prin p { color: var(--ink-2); font-size: 14px; margin-top: 4px; }
+
+  /* ---------- mockups (the product's own glass language) ---------- */
+  .mock-stage {
+    border-radius: 18px; border: 1px solid var(--line-soft);
+    background:
+      radial-gradient(500px 260px at 70% 0%, rgba(90,200,250,.08), transparent 65%),
+      linear-gradient(160deg, #171c25, #0f1218 55%, #131019);
+    padding: 34px 26px; display: flex; justify-content: center; overflow-x: auto;
+  }
+  .mock-note { font-size: 13px; color: var(--ink-3); margin: 10px 2px 0; }
+  .mock-note strong { color: var(--ink-2); font-weight: 600; }
+  figure { margin: 28px 0 0; }
+  figcaption {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); margin: 0 2px 10px;
+  }
+
+  .glass-card {
+    width: 480px; max-width: 100%; border-radius: 20px;
+    background: linear-gradient(165deg, rgba(62,68,80,.92), rgba(38,42,52,.94));
+    border: 1px solid rgba(255,255,255,.14);
+    box-shadow: 0 18px 50px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.12);
+    padding: 14px 16px 14px; font-size: 13px;
+  }
+  .ctx-bar {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin: -2px -4px 10px;
+    border-radius: 10px; cursor: default;
+  }
+  .ctx-bar:hover { background: rgba(255,255,255,.06); }
+  .dot { width: 8px; height: 8px; border-radius: 99px; flex: none; }
+  .ctx-bar .sess { color: var(--ink); font-weight: 600; }
+  .ctx-bar .proj { color: var(--ink-3); }
+  .ctx-bar .chev { margin-left: auto; color: var(--ink-3); font-size: 11px; }
+  .mock-field {
+    border-radius: 12px; background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.09);
+    padding: 10px 12px; color: rgba(255,255,255,.75); min-height: 54px;
+  }
+  .mock-field.out { margin-top: 8px; color: rgba(255,255,255,.45); }
+  .mock-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .pill {
+    border-radius: 99px; padding: 6px 14px; font-weight: 600; font-size: 12.5px;
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.16); color: var(--ink);
+  }
+  .pill.primary { background: rgba(90,200,250,.22); border-color: rgba(90,200,250,.4); color: #cdeeff; }
+  .slider { flex: 1; height: 3px; border-radius: 99px; background: rgba(255,255,255,.15); position: relative; min-width: 60px; }
+  .slider::after { content: ""; position: absolute; left: 34%; top: 50%; translate: 0 -50%; width: 12px; height: 12px; border-radius: 99px; background: #FF9F0A; }
+  .grounded {
+    margin-top: 10px; font-size: 11px; color: var(--ink-3); display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  }
+  .grounded .g {
+    border: 1px solid var(--line-soft); border-radius: 99px; padding: 1px 8px; color: var(--ink-2); background: rgba(255,255,255,.05);
+  }
+  .grounded .g.on { color: #a9e8b9; border-color: rgba(48,209,88,.35); background: rgba(48,209,88,.08); }
+
+  /* context panel mock */
+  .panel { width: 330px; max-width: 100%; border-radius: 18px;
+    background: linear-gradient(165deg, rgba(58,63,75,.96), rgba(34,38,47,.97));
+    border: 1px solid rgba(255,255,255,.14); box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    padding: 12px; font-size: 13px;
+  }
+  .panel .ph { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); padding: 4px 6px 8px; }
+  .proj-group { border-radius: 12px; border: 1px solid var(--line-soft); background: rgba(255,255,255,.04); padding: 6px; margin-bottom: 8px; }
+  .proj-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-weight: 600; }
+  .proj-row .mini { margin-left: auto; font-weight: 400; font-size: 11px; color: var(--ink-3); }
+  .sess-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px 5px 24px; border-radius: 8px; color: var(--ink-2); }
+  .sess-row.active { background: rgba(90,200,250,.1); color: var(--ink); }
+  .sess-row .badge { margin-left: auto; font-size: 10px; color: var(--good); }
+  .panel .new-row { display: flex; gap: 6px; padding: 2px 2px 0; }
+  .panel .new-row .pill { flex: 1; text-align: center; font-size: 12px; padding: 6px 8px; }
+
+  /* import flow mock */
+  .import-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; width: 100%; }
+  .step-card { border-radius: 14px; border: 1px solid var(--line-soft); background: rgba(255,255,255,.05); padding: 14px; }
+  .step-card .sn { font-family: var(--mono); font-size: 11px; color: var(--accent); display: block; margin-bottom: 6px; }
+  .step-card p { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+  .step-card .auto { margin-top: 8px; font-size: 12px; color: var(--good); }
+
+  /* before/after path */
+  .path-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .path { border-radius: 14px; border: 1px solid var(--line-soft); background: var(--glass); padding: 18px; }
+  .path h3 { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; }
+  .path h3 .n { font-family: var(--mono); font-size: 12px; }
+  .path.before h3 .n { color: var(--pain); }
+  .path.after h3 .n { color: var(--good); }
+  .path ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; counter-reset: s; }
+  .path li { display: grid; grid-template-columns: 20px 1fr; gap: 10px; font-size: 13.5px; color: var(--ink-2); }
+  .path li::before { counter-increment: s; content: counter(s); font-family: var(--mono); font-size: 11px; color: var(--ink-3); text-align: right; padding-top: 2px; }
+  .path li.hidden-step { color: var(--pain); }
+
+  /* roadmap table */
+  .rm { border-radius: 14px; border: 1px solid var(--line-soft); overflow: hidden; }
+  .rm-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 600px; }
+  th { text-align: left; font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; padding: 12px 16px; border-bottom: 1px solid var(--line-soft); background: rgba(255,255,255,.03); }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); vertical-align: top; color: var(--ink-2); }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { color: var(--ink); font-weight: 600; white-space: nowrap; }
+  .chip { font-family: var(--mono); font-size: 10.5px; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+  .chip.now { color: #a9e8b9; background: rgba(48,209,88,.1); border: 1px solid rgba(48,209,88,.3); }
+  .chip.next { color: #cdeeff; background: rgba(90,200,250,.1); border: 1px solid rgba(90,200,250,.3); }
+  .chip.later { color: var(--ink-3); background: rgba(255,255,255,.05); border: 1px solid var(--line-soft); }
+
+  .kicker { margin-top: 72px; border-top: 1px solid var(--line-soft); padding-top: 24px; color: var(--ink-3); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">ANVYL.ai · PromptForge — UX study</p>
+    <h1>Sessions &amp; context, without the detective work</h1>
+    <p class="lede">Your tester wasn't confused because the feature is bad — the session/context system is genuinely strong. They were confused because the overlay <em>hides all of its state and vocabulary behind one ⋮ menu</em>. This is the redesign: make context visible, give it one home, and let the words explain the model.</p>
+  </header>
+
+  <!-- ============ 1. FRICTION AUDIT ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <p class="eyebrow">01 · Where a first-time user gets lost</p>
+      <h2>Five frictions, straight from the current UI</h2>
+      <p class="sec-sub">Each of these is observable in <code>Overlay.tsx</code> today. Together they explain the “little bit confusing” verdict.</p>
+    </div>
+    <div class="pain-list">
+      <div class="pain">
+        <div>
+          <h3>Context state is invisible</h3>
+          <p>The only hint that a session or project is active is the <em>placeholder text</em> in the empty output field. Once anything is typed or generated, there is zero indication of which session you're in, whether a project is attached, or whether context will be used at all.</p>
+          <p class="quote">“Is it… using my context right now? How do I know?”</p>
+        </div>
+      </div>
+      <div class="pain">
+        <div>
+          <h3>Everything lives behind the ⋮ menu</h3>
+          <p><span class="ui">+ New session</span>, <span class="ui">Clear session</span>, the session list, and <span class="ui">Configure context</span> all sit inside one overflow menu — split across <em>two side-by-side panels</em>. Overflow menus are for rare actions; here they hide the product's second-biggest idea.</p>
+        </div>
+      </div>
+      <div class="pain">
+        <div>
+          <h3>Six words, no visible hierarchy</h3>
+          <p>Session, Project, Context, Import, Configure, Scope. The UI never shows that a <em>project contains sessions</em> — sessions are a flat list with colored dots, and projects only appear in a separate picker. The user must reverse-engineer the data model from dot colors.</p>
+        </div>
+      </div>
+      <div class="pain">
+        <div>
+          <h3>The import round-trip explains <em>how</em>, never <em>why</em></h3>
+          <p>“Copy this prompt into a chat with your other AI provider” is a clever flow, but the modal never says what the payoff is (<em>your refinements will understand your work</em>). The Session|Project scope pill sits at the bottom, easy to miss — paste into the wrong scope and nothing warns you.</p>
+        </div>
+      </div>
+      <div class="pain">
+        <div>
+          <h3>Deep nesting for a simple intent</h3>
+          <p>“Start fresh on my project” = ⋮ menu → <span class="ui">+ New session</span> → “Start with project context?” picker → maybe <span class="ui">+ New Project</span> → import modal (scope locked) → back to picker. Four glass surfaces for one intent, and no feedback loop afterwards showing what the context actually did.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2. MENTAL MODEL ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <p class="eyebrow">02 · The model users need to hold</p>
+      <h2>Three layers of context — say so, out loud</h2>
+      <p class="sec-sub">The engine already stacks three kinds of grounding (<code>contextLayer.ts</code>, <code>session.ts</code>). The fix is not new architecture — it's naming the layers in the UI in the user's own words.</p>
+    </div>
+    <div class="layers">
+      <div class="layer l-auto">
+        <span class="tag">Automatic</span>
+        <div>
+          <h3>Where you're typing</h3>
+          <p>App, window, selection, file names — captured on the hotkey, zero effort. Today this layer is completely silent.</p>
+          <p class="rename">Show it: “Detected: Cursor · main.ts” — one read-only line, builds trust for free.</p>
+        </div>
+      </div>
+      <div class="layer l-sess">
+        <span class="tag">Session</span>
+        <div>
+          <h3>What you're working on right now</h3>
+          <p>The current goal — imported once per conversation, dies with it. Internally: <code>SessionContext</code>, titled from its GOAL line.</p>
+          <p class="rename">Speak it: “This session” — and always show its title on the card, not just in a menu.</p>
+        </div>
+      </div>
+      <div class="layer l-proj">
+        <span class="tag">Project</span>
+        <div>
+          <h3>What's always true about your project</h3>
+          <p>Stack, conventions, names — standing knowledge that survives across sessions. Internally: <code>ProjectContext</code> with an accent color.</p>
+          <p class="rename">Speak it: “Project memory” — a folder that <em>contains</em> sessions, shown as a real hierarchy.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. PRINCIPLES ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <p class="eyebrow">03 · Design principles</p>
+      <h2>Four rules for the redesign</h2>
+    </div>
+    <div class="prin-grid">
+      <div class="prin">
+        <span class="k">A — State is visible</span>
+        <h3>Context lives on the card, not in a menu</h3>
+        <p>A one-line context bar at the top of the overlay always shows <em>project dot · session title</em>. Click it → the one context panel. No more guessing.</p>
+      </div>
+      <div class="prin">
+        <span class="k">B — One home</span>
+        <h3>Merge four menu items into one panel</h3>
+        <p>New session, resume, clear, import, project switch — one popover, one hierarchy: projects as groups, sessions nested inside. ⋮ keeps only Position / Settings / Studio / Dismiss.</p>
+      </div>
+      <div class="prin">
+        <span class="k">C — Words teach the model</span>
+        <h3>Rename to the user's vocabulary</h3>
+        <p>“Configure context” → <em>Context</em>. “Import context” → <em>Bring context from your chat</em>. Empty states explain the payoff in one sentence before asking for any work.</p>
+      </div>
+      <div class="prin">
+        <span class="k">D — Close the loop</span>
+        <h3>Show what grounded each refinement</h3>
+        <p>After Refine, a quiet chip row: <em>Grounded by: Session · Project · Cursor</em>. Context stops being a leap of faith — the user sees it working.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. MOCKUPS ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <p class="eyebrow">04 · The redesigned surfaces</p>
+      <h2>Three mockups in the product's own glass</h2>
+      <p class="sec-sub">Same visual system you already ship — <code>.apple-glass</code>, snap placement, no scrim. Only the information design changes.</p>
+    </div>
+
+    <figure>
+      <figcaption>4.1 — Overlay card with persistent context bar + grounding chips</figcaption>
+      <div class="mock-stage">
+        <div class="glass-card">
+          <div class="ctx-bar">
+            <span class="dot" style="background:#5AC8FA"></span>
+            <span class="proj">Anvyl.ai</span>
+            <span style="color:var(--ink-3)">/</span>
+            <span class="sess">Fix overlay session UX</span>
+            <span class="chev">▾</span>
+          </div>
+          <div class="mock-field">make the session thing less confusing for new users, my friend didnt get it</div>
+          <div class="mock-field out">Refine the overlay's session and context UX so a first-time user can see the active session, switch projects, and import context without opening the overflow menu…</div>
+          <div class="mock-foot">
+            <span class="pill">Discard</span>
+            <span class="slider" aria-hidden="true"></span>
+            <span class="pill primary">Refine</span>
+          </div>
+          <div class="grounded">
+            Grounded by
+            <span class="g on">Session</span>
+            <span class="g on">Project</span>
+            <span class="g on">Cursor · Overlay.tsx</span>
+          </div>
+        </div>
+      </div>
+      <p class="mock-note"><strong>What changed:</strong> the context bar (top) is always present — project dot, session title, one click to the panel. The grounding row (bottom) appears after each refine. Both are one line tall; the card's silhouette and folder tabs stay untouched.</p>
+    </figure>
+
+    <figure>
+      <figcaption>4.2 — One context panel: projects contain sessions</figcaption>
+      <div class="mock-stage">
+        <div class="panel">
+          <div class="ph">Context</div>
+          <div class="proj-group">
+            <div class="proj-row"><span class="dot" style="background:#5AC8FA"></span> Anvyl.ai <span class="mini">memory ✓</span></div>
+            <div class="sess-row active"><span>Fix overlay session UX</span><span class="badge">active</span></div>
+            <div class="sess-row"><span>Run history &amp; resume</span></div>
+            <div class="sess-row"><span>+ New session here</span></div>
+          </div>
+          <div class="proj-group">
+            <div class="proj-row"><span class="dot" style="background:#FF9F0A"></span> Landing page <span class="mini">memory ✓</span></div>
+            <div class="sess-row"><span>Hero copy rewrite</span></div>
+          </div>
+          <div class="proj-group">
+            <div class="proj-row" style="font-weight:400;color:var(--ink-2)"><span class="dot" style="background:rgba(255,255,255,.25)"></span> No project</div>
+            <div class="sess-row"><span>Quick one-off prompts</span></div>
+          </div>
+          <div class="new-row">
+            <span class="pill">＋ Project</span>
+            <span class="pill primary">Bring context from your chat</span>
+          </div>
+        </div>
+      </div>
+      <p class="mock-note"><strong>What changed:</strong> the flat session list + separate project picker collapse into one tree. The hierarchy the data already has (<code>projectId</code>) becomes visible; “memory ✓” shows a project has standing context. New session is created <em>inside</em> a project — the “Start with project context?” interstitial disappears entirely.</p>
+    </figure>
+
+    <figure>
+      <figcaption>4.3 — Import flow: clipboard does the third step</figcaption>
+      <div class="mock-stage">
+        <div class="import-flow">
+          <div class="step-card">
+            <span class="sn">STEP 1</span>
+            <h3>Copy the export prompt</h3>
+            <p>“Your refinements will understand this conversation.” One sentence of <em>why</em> above the copy button — the payoff, before the work.</p>
+          </div>
+          <div class="step-card">
+            <span class="sn">STEP 2</span>
+            <h3>Paste it in your AI chat</h3>
+            <p>ChatGPT, Claude, Cursor — anywhere. The AI answers with a structured summary. User copies the answer.</p>
+          </div>
+          <div class="step-card">
+            <span class="sn">STEP 3</span>
+            <h3>ANVYL notices</h3>
+            <p>On overlay refocus, the clipboard already holds a GOAL/PROJECT-shaped summary — detect it.</p>
+            <p class="auto">“Summary found on clipboard — add to this session?” → one click. No paste field hunting, no scope mistakes.</p>
+          </div>
+        </div>
+      </div>
+      <p class="mock-note"><strong>What changed:</strong> the modal's two text boxes become a guided strip; scope is inherited from where you opened it (session row → session, project header → project) instead of a pill at the bottom. Clipboard detection is cheap: the summary format is your own (<code>contextImportPrompt.ts</code> mandates the six numbered labels), so a regex on <code>1. GOAL</code> / <code>1. PROJECT</code> is reliable and privacy-safe — only checked on overlay focus, never stored unless confirmed.</p>
+    </figure>
+  </section>
+
+  <!-- ============ 5. BEFORE / AFTER ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <p class="eyebrow">05 · The click path, measured</p>
+      <h2>“Start a fresh session on my project”</h2>
+    </div>
+    <div class="path-cols">
+      <div class="path before">
+        <h3><span class="n">TODAY — 6 surfaces</span></h3>
+        <ol>
+          <li>Find the ⋮ bump on the folder tab</li>
+          <li>Open menu → two panels appear</li>
+          <li class="hidden-step">Guess: “+ New session”? “Configure context”?</li>
+          <li>Click <em>+ New session</em></li>
+          <li>“Start with project context?” picker opens</li>
+          <li>Click a project row</li>
+          <li class="hidden-step">No confirmation of what's now active</li>
+        </ol>
+      </div>
+      <div class="path after">
+        <h3><span class="n">PROPOSED — 2 clicks</span></h3>
+        <ol>
+          <li>Click the context bar (always visible)</li>
+          <li>Click <em>+ New session here</em> under the project</li>
+          <li>Context bar updates: ● Anvyl.ai / New session — state confirmed at a glance</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. ROADMAP ============ -->
+  <section class="sec">
+    <div class="sec-head">
+      <p class="eyebrow">06 · Build order</p>
+      <h2>Smallest change with the biggest relief first</h2>
+      <p class="sec-sub">Everything reuses existing state and IPC — no schema changes until the tree view. <code>SessionContext.projectId</code> already encodes the hierarchy.</p>
+    </div>
+    <div class="rm"><div class="rm-scroll">
+      <table>
+        <thead>
+          <tr><th>Change</th><th>Wave</th><th>Why it pays</th><th>Touches</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Context bar on card</td>
+            <td><span class="chip now">Now</span></td>
+            <td>Kills friction #1 outright — state visible at all times; the rest of the redesign hangs off this click target.</td>
+            <td><code>Overlay.tsx</code> only — <code>activeSession</code> + project color already in renderer state</td>
+          </tr>
+          <tr>
+            <td>Grounding chip row</td>
+            <td><span class="chip now">Now</span></td>
+            <td>Closes the feedback loop; makes the import effort feel worth it. Data already exists per optimize call.</td>
+            <td><code>Overlay.tsx</code>, optimize response metadata</td>
+          </tr>
+          <tr>
+            <td>Rename + empty-state copy</td>
+            <td><span class="chip now">Now</span></td>
+            <td>Vocabulary teaches the model for free. Pure string changes.</td>
+            <td><code>Overlay.tsx</code> strings</td>
+          </tr>
+          <tr>
+            <td>Unified context panel (tree)</td>
+            <td><span class="chip next">Next</span></td>
+            <td>Replaces menu-panels + project picker interstitial; new session born inside a project.</td>
+            <td><code>Overlay.tsx</code>, small grouping selector over <code>sessions</code>/<code>projects</code></td>
+          </tr>
+          <tr>
+            <td>Scope inherited from entry point</td>
+            <td><span class="chip next">Next</span></td>
+            <td>Removes the wrong-scope paste failure mode; scope pill becomes a label, not a decision.</td>
+            <td>Import modal props (<code>lockedScope</code> pattern already exists)</td>
+          </tr>
+          <tr>
+            <td>Clipboard summary detection</td>
+            <td><span class="chip later">Later</span></td>
+            <td>Turns the 6-step round trip into feel-like-magic; needs a focus-time clipboard sniff + consent toast.</td>
+            <td><code>main.ts</code> focus handler, format regex in <code>shared/</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div></div>
+  </section>
+
+  <p class="kicker">Sources: current behavior read from <code>src/renderer/views/Overlay.tsx</code>, <code>src/shared/session.ts</code>, <code>src/shared/contextImportPrompt.ts</code>, <code>src/main/contextLayer.ts</code>, and the accumulated UX decisions in <code>AGENTS.md</code>. All mockups respect the standing rules: no scrim, no open animation, glass gradients only, footer order Discard → Apply/Refine.</p>
+</div>
