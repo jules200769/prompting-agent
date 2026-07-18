@@ -67,7 +67,6 @@ function buildClaude(original: string, intent: string, persona: string, level: O
     parts.push(`<output_format>[Exact response shape.]</output_format>`);
   }
   if (level >= 4) {
-    parts.push(`<examples>[Brief desired output pattern.]</examples>`);
     parts.push(`<success_criteria>[2–3 checkable criteria.]</success_criteria>`);
     parts.push(`Before finishing, verify the deliverable meets every success criterion.`);
   }

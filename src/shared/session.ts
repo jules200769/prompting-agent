@@ -23,6 +23,8 @@ export interface ProjectContext {
   title: string;
   /** Imported project summary, clamped to PROJECT_CONTEXT_MAX_CHARS. */
   contextText: string;
+  /** Stable accent hex for picker rows; assigned at create time. */
+  color: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -33,6 +35,44 @@ export const PROJECT_CONTEXT_MAX_CHARS = 4000;
 export const SESSIONS_MAX = 50;
 /** LRU cap on stored projects (evicted oldest-by-updatedAt, never the active one). */
 export const PROJECTS_MAX = 20;
+
+/** Distinct accents for project picker rows (cycles when the library is large). */
+export const PROJECT_COLOR_PALETTE = [
+  "#5AC8FA",
+  "#FF9F0A",
+  "#30D158",
+  "#BF5AF2",
+  "#FF453A",
+  "#64D2FF",
+  "#FFD60A",
+  "#FF375F",
+  "#AC8E68",
+  "#0A84FF",
+  "#32ADE6",
+  "#FF6961",
+] as const;
+
+/**
+ * Pick the least-used palette color so new projects stay visually distinct.
+ * Falls back to cycling the palette when every color is already in use.
+ */
+export function assignProjectColor(usedColors: Iterable<string>): string {
+  const counts = new Map<string, number>();
+  for (const c of PROJECT_COLOR_PALETTE) counts.set(c, 0);
+  for (const used of usedColors) {
+    if (counts.has(used)) counts.set(used, (counts.get(used) ?? 0) + 1);
+  }
+  let best: string = PROJECT_COLOR_PALETTE[0];
+  let bestCount = Infinity;
+  for (const c of PROJECT_COLOR_PALETTE) {
+    const n = counts.get(c) ?? 0;
+    if (n < bestCount) {
+      bestCount = n;
+      best = c;
+    }
+  }
+  return best;
+}
 
 export const NEW_SESSION_TITLE = "New session";
 

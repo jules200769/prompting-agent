@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, HistoryItem, HotkeyStatus, LibraryItem, ModelId, OptLevel, WorkbenchSeed } from "../../shared/types";
+import type { AppSettings, HotkeyStatus, LibraryItem, ModelId, OptLevel, RunRecord, RunVerdict, WorkbenchSeed } from "../../shared/types";
 import { MODELS, REWRITE_CONFIG, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
 import { acceleratorDisplayParts } from "../../shared/accelerator";
 import { api } from "../api";
@@ -94,6 +94,7 @@ function Workbench({
   const [busy, setBusy] = useState(false);
   const [streamed, setStreamed] = useState("");
   const [result, setResult] = useState<any>(null);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<{ score: number; subscores: any; weaknesses: string[] } | null>(null);
   const [view, setView] = useState<"diff" | "clean">("diff");
   const toast = useToast();
@@ -128,9 +129,11 @@ function Workbench({
     setBusy(true);
     setStreamed("");
     setResult(null);
+    setLastRunId(null);
     try {
       const res = await api.optimize({ prompt, model, level, persona, context }, (c) => setStreamed((s) => s + c));
       setResult(res);
+      setLastRunId(res.runId);
       setStreamed(res.optimizedPrompt);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -149,6 +152,14 @@ function Workbench({
       model, level, score: result.score, tags: [model, `L${level}`],
     });
     toast({ text: "Saved to library." });
+  }
+
+  async function copyOptimized() {
+    if (!result) return;
+    const text = result.optimizedPrompt;
+    await navigator.clipboard?.writeText(text);
+    void api.historyFinalize({ id: lastRunId ?? undefined, finalPrompt: text, action: "copy" });
+    toast({ text: "Copied to clipboard." });
   }
 
   return (
@@ -266,7 +277,7 @@ function Workbench({
             )}
           </div>
           <div className="flex flex-col gap-2">
-            <button onClick={() => navigator.clipboard?.writeText(result.optimizedPrompt)} className="text-xs px-3 py-1 rounded-md border border-line">Copy</button>
+            <button onClick={() => void copyOptimized()} className="text-xs px-3 py-1 rounded-md border border-line">Copy</button>
             <button onClick={saveToLibrary} className="text-xs px-3 py-1 rounded-md bg-accent text-white">Save to library</button>
           </div>
         </div>
@@ -352,11 +363,33 @@ function Library({ onOpen }: { onOpen: (seed: WorkbenchSeed) => void }) {
 }
 
 // ---------------- History ----------------
+const VERDICT_LABELS: Record<RunVerdict, string> = {
+  good: "Good",
+  bad: "Bad",
+  mixed: "Mixed",
+};
+
+function latestVerdict(record: RunRecord): RunVerdict | undefined {
+  return record.comments.find((c) => c.verdict)?.verdict;
+}
+
 function History({ onOpen }: { onOpen: (seed: WorkbenchSeed) => void }) {
-  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [items, setItems] = useState<RunRecord[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [analysisPath, setAnalysisPath] = useState("");
+  const [commentDraft, setCommentDraft] = useState("");
+  const [commentVerdict, setCommentVerdict] = useState<RunVerdict | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
   const toast = useToast();
-  useEffect(() => { void api.historyList().then(setItems); }, []);
+
+  async function refresh() {
+    setItems(await api.historyList());
+  }
+
+  useEffect(() => {
+    void refresh();
+    void api.historyAnalysisPath().then(setAnalysisPath);
+  }, []);
 
   useEffect(() => {
     if (!confirmingClear) return;
@@ -372,47 +405,205 @@ function History({ onOpen }: { onOpen: (seed: WorkbenchSeed) => void }) {
     setConfirmingClear(false);
     await api.historyClear();
     setItems([]);
-    toast({ text: "History cleared." });
+    setExpandedId(null);
+    toast({ text: "History cleared (analysis file kept)." });
+  }
+
+  async function copyAnalysisPath() {
+    if (!analysisPath) return;
+    await navigator.clipboard?.writeText(analysisPath);
+    toast({ text: "Analysis file path copied." });
+  }
+
+  async function saveComment(runId: string) {
+    const text = commentDraft.trim();
+    if (!text && !commentVerdict) return;
+    const updated = await api.historyAddComment({
+      id: runId,
+      text: text || VERDICT_LABELS[commentVerdict!],
+      verdict: commentVerdict ?? undefined,
+    });
+    if (!updated) {
+      toast({ text: "Could not save comment." });
+      return;
+    }
+    setCommentDraft("");
+    setCommentVerdict(null);
+    await refresh();
+    toast({ text: "Comment saved." });
+  }
+
+  function toggleExpand(id: string) {
+    setExpandedId((prev) => (prev === id ? null : id));
+    setCommentDraft("");
+    setCommentVerdict(null);
   }
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-5 py-3 border-b border-line flex items-center">
+      <div className="px-5 py-3 border-b border-line flex items-center gap-3">
         <h2 className="font-semibold">History</h2>
+        {analysisPath && (
+          <button
+            onClick={() => void copyAnalysisPath()}
+            className="text-[10px] text-muted hover:text-slate-200 truncate max-w-[280px]"
+            title={analysisPath}
+          >
+            Copy analysis path
+          </button>
+        )}
         <button
           onClick={() => void onClear()}
-          className={`ml-auto text-xs ${confirmingClear ? "text-bad font-semibold" : "text-muted hover:text-bad"}`}
+          className={`ml-auto text-xs shrink-0 ${confirmingClear ? "text-bad font-semibold" : "text-muted hover:text-bad"}`}
         >
           {confirmingClear ? "Confirm clear?" : "clear"}
         </button>
       </div>
       <div className="flex-1 overflow-auto scroll-thin p-4 space-y-2">
         {items.length === 0 && <div className="text-muted text-sm p-8 text-center">No optimizations yet.</div>}
-        {items.map((h) => (
-          <div key={h.id} className="bg-bg-900 border border-line rounded-md p-3 text-xs">
-            <div className="flex items-center gap-2 text-muted">
-              <span>{h.model} · L{h.level} · score {h.score} · {h.source}</span>
-              <span className="ml-auto">{new Date(h.createdAt).toLocaleString()}</span>
-              <button
-                onClick={() => onOpen({ originalText: h.originalText, model: h.model, level: h.level })}
-                className="text-accent-soft hover:underline"
-              >
-                Re-run
-              </button>
-              <button
-                onClick={async () => {
-                  await navigator.clipboard?.writeText(h.optimizedText);
-                  toast({ text: "Copied to clipboard." });
-                }}
-                className="text-accent-soft hover:underline"
-              >
-                Copy out
-              </button>
+        {items.map((h) => {
+          const verdict = latestVerdict(h);
+          const expanded = expandedId === h.id;
+          const outText = h.output.finalPrompt ?? h.output.optimizedPrompt;
+          return (
+            <div key={h.id} className="bg-bg-900 border border-line rounded-md p-3 text-xs">
+              <div className="flex items-center gap-2 text-muted flex-wrap">
+                <button
+                  onClick={() => toggleExpand(h.id)}
+                  className="text-slate-200 hover:text-white font-medium"
+                >
+                  {expanded ? "▾" : "▸"}
+                </button>
+                <span>
+                  {h.input.model} · L{h.input.level} · score {h.output.score} · {h.output.source}
+                  {h.fromCache ? " · cache" : ""} · {h.surface}
+                </span>
+                {verdict && (
+                  <span className="px-1.5 py-0.5 rounded bg-bg-800 text-slate-200">{VERDICT_LABELS[verdict]}</span>
+                )}
+                {h.comments.length > 0 && (
+                  <span className="text-muted">{h.comments.length} comment{h.comments.length === 1 ? "" : "s"}</span>
+                )}
+                <span className="ml-auto">{new Date(h.createdAt).toLocaleString()}</span>
+                <button
+                  onClick={() => onOpen({ originalText: h.input.prompt, model: h.input.model, level: h.input.level, optimizedText: outText })}
+                  className="text-accent-soft hover:underline"
+                >
+                  Re-run
+                </button>
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard?.writeText(outText);
+                    void api.historyFinalize({ id: h.id, finalPrompt: outText, action: "copy" });
+                    toast({ text: "Copied to clipboard." });
+                  }}
+                  className="text-accent-soft hover:underline"
+                >
+                  Copy out
+                </button>
+              </div>
+              <div className="mt-1 text-slate-400 line-clamp-1"><span className="text-muted">in:</span> {h.input.prompt}</div>
+              <div className="text-slate-200 line-clamp-2"><span className="text-muted">out:</span> {outText}</div>
+
+              {expanded && (
+                <div className="mt-3 pt-3 border-t border-line space-y-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    {h.input.promptType && h.input.promptType !== "auto" && (
+                      <span className="px-1.5 py-0.5 rounded bg-bg-800 text-muted">type:{h.input.promptType}</span>
+                    )}
+                    {h.input.terminalContext && (
+                      <span className="px-1.5 py-0.5 rounded bg-bg-800 text-muted">terminal</span>
+                    )}
+                    {h.input.writingType && (
+                      <span className="px-1.5 py-0.5 rounded bg-bg-800 text-muted">writing:{h.input.writingType}</span>
+                    )}
+                    {h.actions?.applied && (
+                      <span className="px-1.5 py-0.5 rounded bg-bg-800 text-muted">applied</span>
+                    )}
+                    {h.actions?.copied && (
+                      <span className="px-1.5 py-0.5 rounded bg-bg-800 text-muted">copied</span>
+                    )}
+                    {h.actions?.edited && (
+                      <span className="px-1.5 py-0.5 rounded bg-bg-800 text-muted">edited</span>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted mb-1">Original</div>
+                    <pre className="whitespace-pre-wrap break-words text-slate-300 font-mono text-[11px] max-h-40 overflow-auto scroll-thin">{h.input.prompt}</pre>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted mb-1">
+                      {h.output.finalPrompt ? "Final output" : "Optimized"}
+                    </div>
+                    <pre className="whitespace-pre-wrap break-words text-slate-200 font-mono text-[11px] max-h-48 overflow-auto scroll-thin">{outText}</pre>
+                    {h.output.finalPrompt && h.output.finalPrompt !== h.output.optimizedPrompt && (
+                      <details className="mt-2">
+                        <summary className="text-muted cursor-pointer">Model output</summary>
+                        <pre className="mt-1 whitespace-pre-wrap break-words text-slate-400 font-mono text-[11px] max-h-32 overflow-auto scroll-thin">
+                          {h.output.optimizedPrompt}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
+
+                  {h.output.notes.length > 0 && (
+                    <ul className="text-[10px] text-muted list-disc list-inside space-y-0.5">
+                      {h.output.notes.map((n, i) => <li key={i}>{n}</li>)}
+                    </ul>
+                  )}
+
+                  {h.comments.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-[10px] uppercase tracking-wider text-muted">Comments</div>
+                      {h.comments.map((c) => (
+                        <div key={c.id} className="border border-line rounded px-2 py-1.5">
+                          <div className="flex items-center gap-2 text-muted mb-0.5">
+                            {c.verdict && <span className="text-slate-200">{VERDICT_LABELS[c.verdict]}</span>}
+                            <span className="ml-auto">{new Date(c.createdAt).toLocaleString()}</span>
+                          </div>
+                          {c.text && <div className="text-slate-300 whitespace-pre-wrap">{c.text}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <div className="text-[10px] uppercase tracking-wider text-muted">Add comment</div>
+                    <div className="flex gap-1.5">
+                      {(["good", "bad", "mixed"] as RunVerdict[]).map((v) => (
+                        <button
+                          key={v}
+                          onClick={() => setCommentVerdict((prev) => (prev === v ? null : v))}
+                          className={`px-2 py-0.5 rounded text-[10px] border ${
+                            commentVerdict === v
+                              ? "border-accent text-accent-soft bg-accent/10"
+                              : "border-line text-muted hover:text-slate-200"
+                          }`}
+                        >
+                          {VERDICT_LABELS[v]}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      value={commentDraft}
+                      onChange={(e) => setCommentDraft(e.target.value)}
+                      placeholder="What worked or what went wrong?"
+                      className="w-full h-16 bg-bg-950 border border-line rounded px-2 py-1.5 text-[11px] resize-none focus:outline-none scroll-thin"
+                    />
+                    <button
+                      onClick={() => void saveComment(h.id)}
+                      disabled={!commentDraft.trim() && !commentVerdict}
+                      className="text-xs px-3 py-1 rounded-md bg-accent text-white disabled:opacity-40"
+                    >
+                      Save comment
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="mt-1 text-slate-400 line-clamp-1"><span className="text-muted">in:</span> {h.originalText}</div>
-            <div className="text-slate-200 line-clamp-2"><span className="text-muted">out:</span> {h.optimizedText}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

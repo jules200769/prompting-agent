@@ -1,13 +1,14 @@
 // Shared optimize path for IPC and the browser preview dev bridge.
 
-import type { OptimizeRequest, OptimizeResult } from "../shared/types";
+import type { OptimizeRequest, OptimizeWithRunId, RunSurface } from "../shared/types";
 import { optimize } from "../engine/orchestrator";
 import * as store from "./storage";
 
 export async function runOptimize(
   req: OptimizeRequest,
   onText: (chunk: string) => void,
-): Promise<OptimizeResult> {
+  surface: RunSurface = "dev",
+): Promise<OptimizeWithRunId> {
   // Session/project context is resolved here, main-side, for every optimize
   // surface (overlay, Studio, dev bridge) — renderer-supplied values are
   // always overwritten so the store stays the single source of truth.
@@ -22,10 +23,11 @@ export async function runOptimize(
   const cached = enriched.skipCache ? null : store.getCache(hash, enriched.prompt);
   if (cached) {
     onText(cached.optimizedPrompt);
-    return cached;
+    const runId = store.addRunRecord(cached, enriched, surface, true);
+    return { ...cached, runId };
   }
   const result = await optimize({ request: enriched, onText });
   store.setCache(hash, result);
-  store.addHistory(result, enriched.prompt);
-  return result;
+  const runId = store.addRunRecord(result, enriched, surface, false);
+  return { ...result, runId };
 }

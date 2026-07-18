@@ -8,15 +8,23 @@ import { join } from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import type {
   AppSettings,
+  HistoryAddCommentRequest,
+  HistoryFinalizeRequest,
   HistoryItem,
   LibraryItem,
   ModelId,
   OptLevel,
+  OptimizeRequest,
   OptimizeResult,
+  RunRecord,
+  RunRecordInput,
+  RunRecordOutput,
+  RunSurface,
   SubScores,
 } from "../shared/types";
 import { DEFAULT_SETTINGS } from "../shared/types";
 import {
+  assignProjectColor,
   clampContextText,
   deriveProjectTitle,
   deriveSessionTitle,
@@ -31,6 +39,7 @@ import { isExcludedContextFileName } from "../shared/contextSignals";
 import { nearestPlacement, type DisplayRect, type OverlaySize } from "../shared/overlayPosition";
 import { buildDiff } from "../engine/diff";
 import { adherenceLevel } from "../engine/rubric";
+import { appendRunHistoryJsonl, runHistoryJsonlPath } from "./runHistoryJsonl";
 
 const OPT_CACHE_MAX = 100;
 
@@ -59,7 +68,7 @@ interface FileMemoryEntry {
 interface StoreShape {
   settings: AppSettings | null;
   library: LibraryItem[];
-  history: HistoryItem[];
+  history: RunRecord[];
   optCache: Record<string, CachedOptimizeEntry>;
   optCacheOrder: string[];
   fileMemory: FileMemoryEntry[];
@@ -116,7 +125,25 @@ function load(): StoreShape {
             projectId: s.projectId ?? null,
           }))
         : [],
+      history: migrateHistoryArray(parsed.history),
     };
+    // Backfill accent colors for projects created before color existed.
+    {
+      const assigned: string[] = [];
+      let migrated = false;
+      for (const project of data.projects) {
+        if (!project.color) {
+          project.color = assignProjectColor(assigned);
+          migrated = true;
+        }
+        assigned.push(project.color);
+      }
+      if (migrated) {
+        const dir = app.getPath("userData");
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(filePath(), JSON.stringify(data, null, 2), "utf8");
+      }
+    }
     // Migrate legacy full OptimizeResult entries to slim cache shape.
     for (const [key, entry] of Object.entries(data.optCache)) {
       if ("diff" in entry) {
@@ -132,6 +159,7 @@ function load(): StoreShape {
         id: uuid(),
         title: deriveProjectTitle(legacyProject, now),
         contextText: clampContextText(legacyProject, PROJECT_CONTEXT_MAX_CHARS),
+        color: assignProjectColor([]),
         createdAt: now,
         updatedAt: now,
       };
@@ -156,6 +184,100 @@ function persist(): void {
 
 export function initDb(): void {
   load();
+}
+
+function emptySubScores(): SubScores {
+  return {
+    clarity: 0,
+    context: 0,
+    structure: 0,
+    format: 0,
+    examples: 0,
+    persona: 0,
+    verifiability: 0,
+  };
+}
+
+function isLegacyHistoryItem(item: unknown): item is HistoryItem {
+  return (
+    typeof item === "object" &&
+    item !== null &&
+    "originalText" in item &&
+    !("schemaVersion" in item)
+  );
+}
+
+function migrateLegacyHistoryItem(old: HistoryItem): RunRecord {
+  return {
+    id: old.id,
+    schemaVersion: 1,
+    createdAt: old.createdAt,
+    surface: "studio",
+    input: {
+      prompt: old.originalText,
+      model: old.model,
+      level: old.level,
+    },
+    output: {
+      optimizedPrompt: old.optimizedText,
+      score: old.score,
+      baselineScore: 0,
+      subscores: emptySubScores(),
+      baselineSubscores: emptySubScores(),
+      adherenceLevel: old.level,
+      notes: [],
+      source: old.source,
+      packVersion: "",
+    },
+    comments: [],
+  };
+}
+
+function migrateHistoryArray(raw: unknown): RunRecord[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) =>
+    isLegacyHistoryItem(item) ? migrateLegacyHistoryItem(item) : (item as RunRecord),
+  );
+}
+
+function buildRunInput(req: OptimizeRequest): RunRecordInput {
+  return {
+    prompt: req.prompt,
+    model: req.model,
+    level: req.level,
+    persona: req.persona,
+    context: req.context,
+    promptType: req.promptType,
+    terminalContext: req.terminalContext,
+    writingType: req.writingType,
+    sessionContext: req.sessionContext,
+    projectContext: req.projectContext,
+    captureContext: req.captureContext,
+  };
+}
+
+function buildRunOutput(result: OptimizeResult): RunRecordOutput {
+  return {
+    optimizedPrompt: result.optimizedPrompt,
+    score: result.score,
+    baselineScore: result.baselineScore,
+    subscores: result.subscores,
+    baselineSubscores: result.baselineSubscores,
+    adherenceLevel: result.adherenceLevel,
+    notes: result.notes,
+    source: result.source,
+    packVersion: result.packVersion,
+  };
+}
+
+let lastRunId: string | null = null;
+
+export function getLastRunId(): string | null {
+  return lastRunId;
+}
+
+export function getRunHistoryAnalysisPath(): string {
+  return runHistoryJsonlPath();
 }
 
 function uuid(): string {
@@ -254,26 +376,88 @@ export function deleteLibrary(id: string): void {
   persist();
 }
 
-// ---------- History ----------
-export function listHistory(limit = 100): HistoryItem[] {
+// ---------- History / run ledger ----------
+export function listHistory(limit = 100): RunRecord[] {
   return [...load().history].sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
 }
 
-export function addHistory(r: OptimizeResult, original: string): void {
+function findRunRecord(d: StoreShape, id?: string): RunRecord | null {
+  if (id) return d.history.find((r) => r.id === id) ?? null;
+  if (lastRunId) {
+    const byLast = d.history.find((r) => r.id === lastRunId);
+    if (byLast) return byLast;
+  }
+  return d.history.length > 0
+    ? [...d.history].sort((a, b) => b.createdAt - a.createdAt)[0]
+    : null;
+}
+
+export function addRunRecord(
+  result: OptimizeResult,
+  req: OptimizeRequest,
+  surface: RunSurface,
+  fromCache = false,
+): string {
   const d = load();
-  d.history.push({
-    id: uuid(),
-    originalText: original,
-    optimizedText: r.optimizedPrompt,
-    model: r.model,
-    level: r.level,
-    score: r.score,
-    source: r.source,
+  const id = uuid();
+  const record: RunRecord = {
+    id,
+    schemaVersion: 1,
     createdAt: Date.now(),
-  });
+    surface,
+    fromCache: fromCache || undefined,
+    input: buildRunInput(req),
+    output: buildRunOutput(result),
+    comments: [],
+  };
+  d.history.unshift(record);
   d.history.sort((a, b) => b.createdAt - a.createdAt);
   d.history = d.history.slice(0, 500);
+  lastRunId = id;
   persist();
+  appendRunHistoryJsonl("created", record);
+  return id;
+}
+
+/** @deprecated Use addRunRecord. Kept for callers during transition. */
+export function addHistory(r: OptimizeResult, original: string): void {
+  addRunRecord(r, { prompt: original, model: r.model, level: r.level }, "studio");
+}
+
+export function addRunComment(payload: HistoryAddCommentRequest): RunRecord | null {
+  const text = payload.text.trim();
+  if (!text && !payload.verdict) return null;
+  const d = load();
+  const record = d.history.find((r) => r.id === payload.id);
+  if (!record) return null;
+  const comment = {
+    id: uuid(),
+    text,
+    createdAt: Date.now(),
+    verdict: payload.verdict,
+  };
+  record.comments.unshift(comment);
+  persist();
+  appendRunHistoryJsonl("commented", record);
+  return record;
+}
+
+export function finalizeRun(payload: HistoryFinalizeRequest): RunRecord | null {
+  const d = load();
+  const record = findRunRecord(d, payload.id);
+  if (!record) return null;
+  const finalPrompt = payload.finalPrompt.trim();
+  if (!finalPrompt) return null;
+  const edited = finalPrompt !== record.output.optimizedPrompt;
+  record.output.finalPrompt = finalPrompt;
+  record.actions = {
+    ...record.actions,
+    edited: edited || record.actions?.edited,
+    ...(payload.action === "apply" ? { applied: true } : { copied: true }),
+  };
+  persist();
+  appendRunHistoryJsonl("finalized", record);
+  return record;
 }
 
 export function clearHistory(): void {
@@ -415,11 +599,13 @@ export function upsertActiveProject(text: string): ProjectContext {
     project.contextText = clamped;
     project.title = deriveProjectTitle(project.contextText, project.createdAt);
     project.updatedAt = now;
+    if (!project.color) project.color = assignProjectColor(d.projects.map((p) => p.color).filter(Boolean));
   } else {
     project = {
       id: uuid(),
       title: deriveProjectTitle(clamped, now),
       contextText: clamped,
+      color: assignProjectColor(d.projects.map((p) => p.color).filter(Boolean)),
       createdAt: now,
       updatedAt: now,
     };

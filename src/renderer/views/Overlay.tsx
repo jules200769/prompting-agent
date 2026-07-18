@@ -208,26 +208,36 @@ function ContextScopePill({
   onChange,
   sessionConfigured,
   projectConfigured,
+  lockedScope,
 }: {
   value: ContextImportScope;
   onChange: (scope: ContextImportScope) => void;
   sessionConfigured: boolean;
   projectConfigured: boolean;
+  /** When set, only that scope is shown — used by "+ New Project" flow. */
+  lockedScope?: ContextImportScope;
 }) {
+  const options = (
+    [
+      { id: "session", label: "Session", configured: sessionConfigured },
+      { id: "project", label: "Project", configured: projectConfigured },
+    ] as const
+  ).filter((option) => !lockedScope || option.id === lockedScope);
+
   return (
     <div
       className="inline-flex items-center rounded-full p-0.5 bg-white/10 border border-white/15 shrink-0"
       role="group"
       aria-label="Context scope"
     >
-      {([
-        { id: "session", label: "Session", configured: sessionConfigured },
-        { id: "project", label: "Project", configured: projectConfigured },
-      ] as const).map((option) => (
+      {options.map((option) => (
         <button
           key={option.id}
           type="button"
-          onClick={() => onChange(option.id)}
+          onClick={() => {
+            if (lockedScope) return;
+            onChange(option.id);
+          }}
           aria-label={
             option.configured ? `${option.label}, configured` : `${option.label}, not configured`
           }
@@ -312,6 +322,8 @@ export function Overlay() {
   const [terminalContext, setTerminalContext] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const [newSessionPickerOpen, setNewSessionPickerOpen] = useState(false);
+  /** True when Import context was opened from "+ New Project" (project scope locked). */
+  const [newProjectFlow, setNewProjectFlow] = useState(false);
   const [pickerProjects, setPickerProjects] = useState<ProjectContext[]>([]);
   const [pendingDeleteProject, setPendingDeleteProject] = useState<ProjectContext | null>(null);
   const [contextImportScope, setContextImportScope] = useState<ContextImportScope>("session");
@@ -340,6 +352,8 @@ export function Overlay() {
     onApply: () => {},
     onCopy: () => {},
   });
+  const lastRunIdRef = useRef<string | null>(null);
+  const resumeContextModalRef = useRef(false);
 
   keyStateRef.current = { mode, phase, captureFailed: mode === "empty" };
 
@@ -360,6 +374,17 @@ export function Overlay() {
     void api.projectContextGet().then(setStandingProjectContext);
   }
 
+  function closeContextModal(opts?: { returnToSessionPicker?: boolean }): void {
+    const returnToPicker = opts?.returnToSessionPicker ?? false;
+    resumeContextModalRef.current = false;
+    setNewProjectFlow(false);
+    setContextModalOpen(false);
+    if (returnToPicker) {
+      setPendingDeleteProject(null);
+      setNewSessionPickerOpen(true);
+    }
+  }
+
   function resetOverlaySession(): void {
     flushSync(() => {
       captureRef.current = null;
@@ -369,6 +394,7 @@ export function Overlay() {
       resetTypewriter();
       setOutputText("");
       setHasGenerated(false);
+      lastRunIdRef.current = null;
       setMenuOpen(false);
       setApplyNotice(null);
       setTerminalContext(false);
@@ -426,10 +452,11 @@ export function Overlay() {
         resetTypewriter();
         setOutputText("");
         setHasGenerated(false);
+        lastRunIdRef.current = null;
         setMenuOpen(false);
         setApplyNotice(null);
         setShellVisible(true);
-        setContextModalOpen(false);
+        setContextModalOpen(resumeContextModalRef.current);
         setNewSessionPickerOpen(false);
         setContextSaved(false);
         setImportPromptCopied(false);
@@ -451,6 +478,7 @@ export function Overlay() {
       resetTypewriter();
       setOutputText("");
       setHasGenerated(false);
+      lastRunIdRef.current = null;
       setMenuOpen(false);
       setApplyNotice(null);
       ackOverlayPrepared();
@@ -511,6 +539,18 @@ export function Overlay() {
     setNewSessionPickerOpen(false);
   }
 
+  /** Open Import context locked to project; creates a new project + session on save. */
+  function onNewProjectFromPicker(): void {
+    setNewSessionPickerOpen(false);
+    setPendingDeleteProject(null);
+    setImportPromptCopied(false);
+    setContextSaved(false);
+    setContextImportScope("project");
+    setImportedProjectContext("");
+    setNewProjectFlow(true);
+    setContextModalOpen(true);
+  }
+
   async function onConfirmDeleteProject() {
     if (!pendingDeleteProject) return;
     const id = pendingDeleteProject.id;
@@ -558,9 +598,17 @@ export function Overlay() {
 
   async function onAddToContext() {
     if (contextImportScope === "project") {
+      // Clear active first so upsert creates a fresh library entry (not an overwrite).
+      if (newProjectFlow) {
+        await api.projectSetActive(null);
+      }
       const project = await api.projectUpsertActive(importedProjectContext);
       setStandingProjectContext(project.contextText);
       setImportedProjectContext(project.contextText);
+      if (newProjectFlow) {
+        setActiveSession(await api.sessionCreate(project.id));
+        setNewProjectFlow(false);
+      }
     } else {
       const target = activeSession ?? (await api.sessionCreate());
       setActiveSession(await api.sessionSetContext(target.id, importedSessionContext));
@@ -568,7 +616,7 @@ export function Overlay() {
     setContextSaved(true);
     window.setTimeout(() => {
       setContextSaved(false);
-      setContextModalOpen(false);
+      closeContextModal();
     }, 900);
   }
 
@@ -592,6 +640,7 @@ export function Overlay() {
         },
         isTerminalSession ? (chunk) => appendTarget(stripTerminalStreamChunk(chunk)) : appendTarget,
       );
+      lastRunIdRef.current = res.runId;
       const refined = isTerminalSession ? toTerminalSingleLine(res.optimizedPrompt) : res.optimizedPrompt;
       setTarget(refined);
       await waitUntilRevealed();
@@ -612,6 +661,7 @@ export function Overlay() {
     if (!outputText.trim() || phase !== "done") return;
     setApplyNotice(null);
     const text = isTerminalSession ? toTerminalSingleLine(outputText) : outputText;
+    void api.historyFinalize({ id: lastRunIdRef.current ?? undefined, finalPrompt: text, action: "apply" });
     const res = await api.captureInject(text, captureRef.current?.snapshot ?? { text: "", hasText: false });
     if (res === "copied") {
       setApplyNotice("Couldn't insert — copied to clipboard");
@@ -621,17 +671,19 @@ export function Overlay() {
   async function onCopy() {
     if (!outputText.trim()) return;
     const text = isTerminalSession ? toTerminalSingleLine(outputText) : outputText;
+    void api.historyFinalize({ id: lastRunIdRef.current ?? undefined, finalPrompt: text, action: "copy" });
     await api.captureCopy(text);
   }
 
   async function onCopyImportPrompt() {
     await api.captureCopy(contextImportPromptFor(contextImportScope));
+    resumeContextModalRef.current = true;
     setImportPromptCopied(true);
-    window.setTimeout(() => setImportPromptCopied(false), 2000);
+    api.hideOverlay();
   }
 
   function onContextImportScopeChange(scope: ContextImportScope) {
-    if (scope === contextImportScope) return;
+    if (newProjectFlow || scope === contextImportScope) return;
     setContextImportScope(scope);
     setImportPromptCopied(false);
   }
@@ -799,6 +851,7 @@ export function Overlay() {
                   setMenuOpen(false);
                   setImportPromptCopied(false);
                   setContextSaved(false);
+                  setNewProjectFlow(false);
                   setContextImportScope("session");
                   // Prefill from the store so the modal doubles as the editor.
                   setImportedSessionContext(activeSession?.contextText ?? "");
@@ -1034,7 +1087,7 @@ export function Overlay() {
               </button>
             </div>
             <div
-              className="mb-1 max-h-[200px] overflow-y-auto scroll-thin rounded-xl border border-white/10 bg-black/30 p-1"
+              className="mb-1 max-h-[200px] overflow-y-auto scroll-thin rounded-xl border border-white/10 bg-black/30 p-1 space-y-1"
               role="listbox"
               aria-label="Project"
             >
@@ -1042,17 +1095,37 @@ export function Overlay() {
                 type="button"
                 role="option"
                 onClick={() => void onStartNewSession(null)}
-                className="w-full text-left rounded-lg px-3 py-2 text-[13px] transition text-white/70 hover:bg-white/10 hover:text-white"
+                className="w-full text-left rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-[13px] transition text-white/55 hover:bg-white/15 hover:border-white/20 hover:text-white/75"
               >
                 No project
               </button>
+              <button
+                type="button"
+                role="option"
+                onClick={onNewProjectFromPicker}
+                className="w-full text-left rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-[13px] transition text-white/55 hover:bg-white/15 hover:border-white/20 hover:text-white/75"
+              >
+                + New Project
+              </button>
               {pickerProjects.map((p) => (
-                <div key={p.id} className="flex items-center gap-0.5">
+                <div
+                  key={p.id}
+                  className="flex items-center gap-0.5 rounded-lg border transition"
+                  style={{
+                    borderColor: `${p.color}66`,
+                    backgroundColor: `${p.color}22`,
+                  }}
+                >
+                  <span
+                    className="ml-2 h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: p.color }}
+                    aria-hidden
+                  />
                   <button
                     type="button"
                     role="option"
                     onClick={() => void onStartNewSession(p.id)}
-                    className="min-w-0 flex-1 text-left rounded-lg px-3 py-2 text-[13px] transition truncate text-white/70 hover:bg-white/10 hover:text-white"
+                    className="min-w-0 flex-1 text-left rounded-lg px-2.5 py-2 text-[13px] transition truncate text-white/80 hover:bg-white/10 hover:text-white"
                     title={p.title}
                   >
                     {p.title}
@@ -1091,7 +1164,9 @@ export function Overlay() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center px-6"
           onPointerDown={(e) => {
-            if (e.target === e.currentTarget) setContextModalOpen(false);
+            if (e.target === e.currentTarget) {
+              closeContextModal({ returnToSessionPicker: newProjectFlow });
+            }
           }}
         >
           <div className="apple-glass-menu relative w-full max-w-[480px] rounded-[24px] p-5 text-white">
@@ -1099,7 +1174,7 @@ export function Overlay() {
               <h2 className="text-[16px] font-medium">Import context to ANVYL.ai</h2>
               <button
                 type="button"
-                onClick={() => setContextModalOpen(false)}
+                onClick={() => closeContextModal({ returnToSessionPicker: newProjectFlow })}
                 className="text-white/50 hover:text-white transition shrink-0"
                 aria-label="Close"
               >
@@ -1173,11 +1248,12 @@ export function Overlay() {
                   onChange={onContextImportScopeChange}
                   sessionConfigured={Boolean(importedSessionContext.trim())}
                   projectConfigured={Boolean(importedProjectContext.trim())}
+                  lockedScope={newProjectFlow ? "project" : undefined}
                 />
               </div>
               <button
                 type="button"
-                onClick={() => setContextModalOpen(false)}
+                onClick={() => closeContextModal({ returnToSessionPicker: newProjectFlow })}
                 className="rounded-xl px-3.5 py-2 text-[13px] text-white/70 hover:bg-white/10 transition"
               >
                 Cancel

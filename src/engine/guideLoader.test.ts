@@ -52,8 +52,9 @@ describe("guideLoader", () => {
     expect(warm).toContain("<instructions>");
     expect(warm).toContain("<input>");
     expect(hot).toContain("<output_format>");
-    expect(max).toContain("<examples>");
     expect(max).toContain("<success_criteria>");
+    expect(max.toLowerCase()).toContain("do not add <examples>");
+    expect(max).not.toMatch(/REQUIRED tags.*<examples>/);
     expect(max).toContain("<constraints>");
     expect(max).toContain("<output_format>");
   });
@@ -67,8 +68,9 @@ describe("guideLoader", () => {
     expect(warm.toLowerCase()).toContain("personality");
     expect(hot).toContain("## Output format");
     expect(hot.toLowerCase()).toContain("do not add ## examples");
-    expect(max).toContain("## Examples");
     expect(max).toContain("## Success criteria");
+    expect(max.toLowerCase()).toContain("do not add ## examples");
+    expect(max).not.toMatch(/REQUIRED headers.*## Examples/);
     expect(max.toLowerCase()).toContain("do not add # personality");
   });
 
@@ -82,8 +84,8 @@ describe("guideLoader", () => {
     expect(warm.toLowerCase()).toContain("do not add process");
     expect(hot.toLowerCase()).toContain("output format");
     expect(hot.toLowerCase()).toContain("do not add examples");
-    expect(max.toLowerCase()).toContain("examples");
     expect(max.toLowerCase()).toContain("success criteria");
+    expect(max.toLowerCase()).toContain("do not add examples");
   });
 
   it("DeepSeek contracts enforce level differentiation", () => {
@@ -107,8 +109,8 @@ describe("guideLoader", () => {
     expect(warm).toContain("GOAL:");
     expect(warm.toLowerCase()).toContain("no xml");
     expect(hot).toContain("QUALITY BAR");
-    expect(max).toContain("EXAMPLES");
     expect(max).toContain("SUCCESS CRITERIA");
+    expect(max.toLowerCase()).toContain("do not add examples");
   });
 
   it("Gemini contracts put constraints last and enforce level scale", () => {
@@ -231,14 +233,21 @@ describe("optimizeLocal", () => {
     expect(res.optimizedPrompt).toContain("cold email");
   });
 
-  it("adds examples and success criteria at level 4 for Claude", async () => {
+  it("forbids examples in buildMetaPrompt output rules", async () => {
+    const { buildMetaPrompt } = await import("./providers");
+    const max = buildMetaPrompt({ prompt: "write a cold email", model: "claude-opus-4.8", level: 4 });
+    expect(max.system.toLowerCase()).toContain("never add examples");
+    expect(max.system).not.toContain("plus examples and success criteria");
+  });
+
+  it("adds success criteria without examples at level 4 for Claude", async () => {
     const { optimizeLocal } = await import("./localOptimizer");
     const res = optimizeLocal({
       prompt: "please help me write a cold email",
       model: "claude-opus-4.8",
       level: 4,
     });
-    expect(res.optimizedPrompt).toContain("<examples>");
+    expect(res.optimizedPrompt).not.toContain("<examples>");
     expect(res.optimizedPrompt).toContain("<success_criteria>");
   });
 

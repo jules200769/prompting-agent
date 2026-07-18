@@ -1,6 +1,6 @@
 // Preload: exposes a tight allowlist IPC API to the renderer. No Node globals leak.
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type OptimizeRequest, type AppSettings, type CaptureContext, type CaptureMode, type HotkeyStatus, type InjectResult, type OverlayPlacement, type Provider, type SettingsSetResult, type WorkbenchSeed } from "../shared/types";
+import { IPC, type OptimizeRequest, type AppSettings, type CaptureContext, type CaptureMode, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type InjectResult, type OverlayPlacement, type Provider, type RunRecord, type SettingsSetResult, type WorkbenchSeed } from "../shared/types";
 import type { ProjectContext, SessionContext } from "../shared/session";
 
 type OverlayShowPayload = {
@@ -82,8 +82,13 @@ const api = {
   librarySave: (input: any) => ipcRenderer.invoke(IPC.LIBRARY_SAVE, input),
   libraryDelete: (id: string) => ipcRenderer.invoke(IPC.LIBRARY_DELETE, id),
 
-  historyList: () => ipcRenderer.invoke(IPC.HISTORY_LIST),
+  historyList: () => ipcRenderer.invoke(IPC.HISTORY_LIST) as Promise<RunRecord[]>,
   historyClear: () => ipcRenderer.invoke(IPC.HISTORY_CLEAR),
+  historyAddComment: (payload: HistoryAddCommentRequest) =>
+    ipcRenderer.invoke(IPC.HISTORY_ADD_COMMENT, payload) as Promise<RunRecord | null>,
+  historyFinalize: (payload: HistoryFinalizeRequest) =>
+    ipcRenderer.invoke(IPC.HISTORY_FINALIZE, payload) as Promise<RunRecord | null>,
+  historyAnalysisPath: () => ipcRenderer.invoke(IPC.HISTORY_ANALYSIS_PATH) as Promise<string>,
 
   sessionList: () => ipcRenderer.invoke(IPC.SESSION_LIST) as Promise<SessionContext[]>,
   sessionCreate: (projectId?: string | null) =>

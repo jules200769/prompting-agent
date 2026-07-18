@@ -234,6 +234,7 @@ export interface LibraryItem {
   updatedAt: number;
 }
 
+/** @deprecated Pre–run-ledger history row; migrated to RunRecord on load. */
 export interface HistoryItem {
   id: string;
   originalText: string;
@@ -243,6 +244,89 @@ export interface HistoryItem {
   score: number;
   source: "llm" | "local";
   createdAt: number;
+}
+
+export type RunVerdict = "good" | "bad" | "mixed";
+
+export type RunSurface = "overlay" | "studio" | "dev";
+
+export type RunHistoryEventType = "created" | "finalized" | "commented";
+
+export interface RunComment {
+  id: string;
+  text: string;
+  createdAt: number;
+  verdict?: RunVerdict;
+}
+
+export interface RunRecordInput {
+  prompt: string;
+  model: ModelId;
+  level: OptLevel;
+  persona?: string;
+  context?: string;
+  promptType?: PromptType;
+  terminalContext?: boolean;
+  writingType?: WritingType;
+  sessionContext?: string;
+  projectContext?: string;
+  captureContext?: CaptureContext;
+}
+
+export interface RunRecordOutput {
+  optimizedPrompt: string;
+  finalPrompt?: string;
+  score: number;
+  baselineScore: number;
+  subscores: SubScores;
+  baselineSubscores: SubScores;
+  adherenceLevel: OptLevel;
+  notes: string[];
+  source: "llm" | "local";
+  packVersion: string;
+}
+
+export interface RunRecordActions {
+  applied?: boolean;
+  copied?: boolean;
+  edited?: boolean;
+}
+
+export interface RunRecord {
+  id: string;
+  schemaVersion: 1;
+  createdAt: number;
+  surface: RunSurface;
+  /** True when the optimize result came from the persisted opt cache. */
+  fromCache?: boolean;
+  input: RunRecordInput;
+  output: RunRecordOutput;
+  actions?: RunRecordActions;
+  comments: RunComment[];
+}
+
+/** Optimize result returned to the renderer, with the persisted run id. */
+export interface OptimizeWithRunId extends OptimizeResult {
+  runId: string;
+}
+
+export interface HistoryFinalizeRequest {
+  id?: string;
+  finalPrompt: string;
+  action: "apply" | "copy";
+}
+
+export interface HistoryAddCommentRequest {
+  id: string;
+  text: string;
+  verdict?: RunVerdict;
+}
+
+/** One NDJSON line in userData/run-history.jsonl. */
+export interface RunHistoryJsonlLine {
+  event: RunHistoryEventType;
+  at: number;
+  run: RunRecord;
 }
 
 export type OverlayPlacement = "center" | "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
@@ -357,6 +441,9 @@ export const IPC = {
   LIBRARY_DELETE: "promptforge:library:delete",
   HISTORY_LIST: "promptforge:history:list",
   HISTORY_CLEAR: "promptforge:history:clear",
+  HISTORY_ADD_COMMENT: "promptforge:history:add-comment",
+  HISTORY_FINALIZE: "promptforge:history:finalize",
+  HISTORY_ANALYSIS_PATH: "promptforge:history:analysis-path",
   SESSION_LIST: "promptforge:session:list",
   SESSION_CREATE: "promptforge:session:create",
   SESSION_SET_CONTEXT: "promptforge:session:set-context",

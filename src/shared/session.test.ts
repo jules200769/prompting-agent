@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  assignProjectColor,
   buildSessionContextBlock,
   clampContextText,
   deriveProjectTitle,
   deriveSessionTitle,
   NEW_SESSION_TITLE,
+  PROJECT_COLOR_PALETTE,
   SESSION_CONTEXT_MAX_CHARS,
 } from "./session";
 
@@ -121,5 +123,23 @@ describe("buildSessionContextBlock", () => {
   it("includes the completed-work rule when context is present", () => {
     const block = buildSessionContextBlock("md exclusion already implemented");
     expect(block).toContain("refine toward the remaining next steps");
+  });
+});
+
+describe("assignProjectColor", () => {
+  it("returns the first palette color when none are used", () => {
+    expect(assignProjectColor([])).toBe(PROJECT_COLOR_PALETTE[0]);
+  });
+
+  it("prefers unused colors before repeating", () => {
+    const first = assignProjectColor([]);
+    const second = assignProjectColor([first]);
+    expect(second).not.toBe(first);
+    expect(PROJECT_COLOR_PALETTE).toContain(second);
+  });
+
+  it("cycles the least-used color when the palette is exhausted", () => {
+    const used = [...PROJECT_COLOR_PALETTE, PROJECT_COLOR_PALETTE[0]];
+    expect(assignProjectColor(used)).toBe(PROJECT_COLOR_PALETTE[1]);
   });
 });

@@ -6,7 +6,7 @@ import type { ModelId, OptLevel } from "../shared/types";
 import { LEVEL_LABELS } from "../shared/types";
 
 /** Bump when meta-prompt / structure contract changes — invalidates persisted opt cache. */
-export const REWRITE_PIPELINE_VERSION = 13;
+export const REWRITE_PIPELINE_VERSION = 14;
 
 const GUIDE_FILES: Record<ModelId, string> = {
   "claude-opus-4.8": "opus4.8.md",
@@ -73,7 +73,7 @@ export function getGuideExcerpt(model: ModelId, level: OptLevel): string {
     for (const kw of keywords) {
       if (h.includes(kw)) s += 10;
     }
-    if (level >= 2 && (h.includes("example") || h.includes("template"))) s += 5;
+    if (level >= 2 && level < 4 && (h.includes("example") || h.includes("template"))) s += 5;
     if (level >= 3 && (h.includes("strateg") || h.includes("technique") || h.includes("pattern"))) s += 4;
     if (level >= 4 && (h.includes("advanced") || h.includes("maximum") || h.includes("critique"))) s += 3;
     return s;
@@ -129,7 +129,7 @@ function levelKeywords(level: OptLevel): string[] {
   const base = ["prompt", "formula", "structure", "best", "guide", "key", "takeaway"];
   if (level >= 2) base.push("format", "role", "persona", "task", "context");
   if (level >= 3) base.push("constraint", "output", "verification", "reasoning");
-  if (level >= 4) base.push("example", "critique", "effort", "thinking", "advanced");
+  if (level >= 4) base.push("critique", "effort", "thinking", "advanced", "verification");
   return base;
 }
 
@@ -139,7 +139,7 @@ export function getLevelRewriteInstruction(level: OptLevel): string {
     1: `Level 1 (Cool — ${label} guide structure): Minimal rewrite only. Fix typos, capitalization, punctuation, and one-line ambiguities. Keep the user's sentences and order. No XML, no markdown headers, no role/persona, no new sections.`,
     2: `Level 2 (Warm — ${label} guide structure): Light model-native structure per the STRUCTURE CONTRACT below. Preserve all user facts; a short role plus imperative task summary only in the instructions section — never duplicate the full prompt there.`,
     3: `Level 3 (Hot — ${label} guide structure): Full guide-compliant structure per the STRUCTURE CONTRACT — for every task type (coding, writing, analysis). Do not invent facts; use brief placeholders only where the user left gaps.`,
-    4: `Level 4 (Max — ${label} guide structure): Everything in Level 3 plus examples and measurable success criteria per the STRUCTURE CONTRACT. Still preserve user intent and exact factual phrases.`,
+    4: `Level 4 (Max — ${label} guide structure): Everything in Level 3 plus measurable success criteria per the STRUCTURE CONTRACT. Never add examples or illustrative sample content. Still preserve user intent and exact factual phrases.`,
   };
   return lines[level];
 }
@@ -188,13 +188,14 @@ export function getLevelStructureContract(model: ModelId, level: OptLevel): stri
 - Apply to ALL task types (coding, writing, analysis) — not only code tasks
 - <output_format>: specify the exact deliverable shape (e.g. email with Subject line; code plus brief change notes)
 - Use brief placeholders like [detail TBD] where the user left gaps; do not invent facts
-- Reframe negative constraints ("don't blame") as positive guidance where possible`;
+- Reframe negative constraints ("don't blame") as positive guidance where possible
+- Do NOT add <examples> or illustrative sample content`;
     }
     return `STRUCTURE CONTRACT (mandatory):
 - Level 4 is Level 3 expanded — do NOT replace or collapse Level 3 sections into <instructions> alone
-- REQUIRED tags (all mandatory): <context>, <task>, <constraints>, <output_format>, <examples>, <success_criteria>
+- REQUIRED tags (all mandatory): <context>, <task>, <constraints>, <output_format>, <success_criteria>
 - Optional: brief <instructions> for role only — never paste the full user prompt there
-- <examples>: at least one brief pattern showing desired tone, format, or answer structure (no invented facts)
+- Do NOT add <examples>, few-shot samples, or illustrative sample output at any level
 - <success_criteria>: 2–3 concrete, checkable criteria the final answer must satisfy
 - End with a brief verification line: confirm the deliverable meets every success criterion before finishing`;
   }
@@ -217,9 +218,9 @@ export function getLevelStructureContract(model: ModelId, level: OptLevel): stri
     }
     return `STRUCTURE CONTRACT (mandatory):
 - Level 4 is Level 3 expanded — keep every Level 3 header; do not collapse into Instructions alone
-- REQUIRED headers (all mandatory, use ## only): ## Context, ## Task, ## Constraints, ## Output format, ## Examples, ## Success criteria
+- REQUIRED headers (all mandatory, use ## only): ## Context, ## Task, ## Constraints, ## Output format, ## Success criteria
+- Do NOT add ## Examples, few-shot samples, or illustrative sample output at any level
 - Do NOT add # Personality, # Collaboration, Role:, # Goal, or # Stop rules — GPT-5.5 paste prompts stay outcome-first, not process-heavy
-- ## Examples: one brief pattern (tone/format/answer shape) — no invented facts
 - ## Success criteria: 2–3 concrete, checkable items
 - End with a brief verification line before finishing`;
   }
@@ -239,7 +240,7 @@ export function getLevelStructureContract(model: ModelId, level: OptLevel): stri
     }
     return `STRUCTURE CONTRACT (mandatory):
 - Level 4 expands Level 3 — keep Context, Task, Output, and Constraints blocks (Constraints still last among core blocks)
-- Add Examples and Success criteria (2–3 checkable items) after Constraints
+- Add Success criteria (2–3 checkable items) after Constraints — do NOT add Examples or illustrative samples at any level
 - End with a brief verification line`;
   }
 
@@ -262,7 +263,7 @@ export function getLevelStructureContract(model: ModelId, level: OptLevel): stri
     }
     return `STRUCTURE CONTRACT (mandatory):
 - Level 4 expands Level 3 — keep Goal, Context, Constraints, and Output format blocks
-- Add Examples (brief diff pattern, email excerpt, or checklist) and Success criteria (2–3 checkable items)
+- Add Success criteria (2–3 checkable items) — do NOT add Examples or illustrative samples at any level
 - End with a brief verification line`;
   }
 
@@ -283,7 +284,7 @@ export function getLevelStructureContract(model: ModelId, level: OptLevel): stri
     }
     return `STRUCTURE CONTRACT (mandatory):
 - Level 4 expands Level 3 — keep GOAL, CONTEXT, OUTPUT FORMAT, and QUALITY BAR blocks
-- Add EXAMPLES (brief tone/format pattern) and SUCCESS CRITERIA (2–3 measurable items) as additional ALL CAPS sections
+- Add SUCCESS CRITERIA (2–3 measurable items) as an additional ALL CAPS section — do NOT add EXAMPLES or illustrative samples at any level
 - Do NOT mix XML tags with Grok blocks
 - End with a brief verification line`;
   }
@@ -303,7 +304,7 @@ export function getLevelStructureContract(model: ModelId, level: OptLevel): stri
   }
   return `STRUCTURE CONTRACT (mandatory):
 - Level 4 expands Level 3 — keep Task, Context, Constraints, and Output format blocks
-- Add Examples and Success criteria (2–3 checkable items)
+- Add Success criteria (2–3 checkable items) — do NOT add Examples or illustrative samples at any level
 - End with a brief verification line`;
 }
 

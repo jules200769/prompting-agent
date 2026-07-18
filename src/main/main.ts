@@ -1,7 +1,7 @@
 // Electron main: lifecycle, overlay + studio windows, tray, global hotkey, IPC.
 import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell, screen } from "electron";
 import { join } from "node:path";
-import { DEFAULT_SETTINGS, IPC, type AppSettings, type CaptureContext, type CaptureMode, type HotkeyStatus, type OptimizeRequest, type OverlayPlacement, type Provider, type SettingsSetResult, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
+import { DEFAULT_SETTINGS, IPC, type AppSettings, type CaptureContext, type CaptureMode, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type OptimizeRequest, type OverlayPlacement, type Provider, type RunSurface, type SettingsSetResult, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
 import { resolveOverlayPosition } from "../shared/overlayPosition";
 import { acceleratorDisplayParts, normalizeAccelerator } from "../shared/accelerator";
 import { analyze } from "../engine/orchestrator";
@@ -480,15 +480,22 @@ function buildTray(): void {
   updateTrayTooltip(store.getSettings().hotkey);
 }
 
+function detectOptimizeSurface(url: string): RunSurface {
+  if (url.includes("overlay")) return "overlay";
+  if (url.includes("studio")) return "studio";
+  return "dev";
+}
+
 // ---------- IPC handlers ----------
 function registerIpc(): void {
   ipcMain.handle(IPC.OPTIMIZE, async (evt, req: OptimizeRequest) => {
     const win = BrowserWindow.fromWebContents(evt.sender);
+    const surface = detectOptimizeSurface(evt.sender.getURL());
     isOptimizing = true;
     try {
       return await runOptimize(req, (chunk) => {
         win?.webContents.send(IPC.OPTIMIZE_STREAM, chunk);
-      });
+      }, surface);
     } finally {
       isOptimizing = false;
     }
@@ -583,6 +590,13 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.HISTORY_LIST, () => store.listHistory());
   ipcMain.handle(IPC.HISTORY_CLEAR, () => { store.clearHistory(); return true; });
+  ipcMain.handle(IPC.HISTORY_ADD_COMMENT, (_evt, payload: HistoryAddCommentRequest) =>
+    store.addRunComment(payload),
+  );
+  ipcMain.handle(IPC.HISTORY_FINALIZE, (_evt, payload: HistoryFinalizeRequest) =>
+    store.finalizeRun(payload),
+  );
+  ipcMain.handle(IPC.HISTORY_ANALYSIS_PATH, () => store.getRunHistoryAnalysisPath());
 
   ipcMain.handle(IPC.SESSION_LIST, () => store.listSessions());
   ipcMain.handle(IPC.SESSION_CREATE, (_evt, projectId?: string | null) =>

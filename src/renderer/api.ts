@@ -7,11 +7,15 @@ import {
   type CaptureMode,
   type InjectResult,
   type OverlayPlacement,
+  type HistoryAddCommentRequest,
+  type HistoryFinalizeRequest,
   type Provider,
+  type RunRecord,
   type SettingsSetResult,
 } from "../shared/types";
 import { devBridgeOptimize, devBridgeSettingsGet } from "./devBridgeClient";
 import {
+  assignProjectColor,
   clampContextText,
   deriveProjectTitle,
   deriveSessionTitle,
@@ -54,6 +58,7 @@ let mockActiveSessionId: string | null = null;
 const mockProjects: ProjectContext[] = [];
 let mockActiveProjectId: string | null = null;
 let mockProjectContext = "";
+const mockRunHistory: RunRecord[] = [];
 
 function mockEvictProjects(): void {
   while (mockProjects.length > PROJECTS_MAX) {
@@ -125,8 +130,39 @@ function createBrowserMock(): PromptForgeAPI {
     librarySave: async () => undefined,
     libraryDelete: async () => undefined,
 
-    historyList: async () => [],
-    historyClear: async () => undefined,
+    historyList: async () => [...mockRunHistory].sort((a, b) => b.createdAt - a.createdAt),
+    historyClear: async () => {
+      mockRunHistory.length = 0;
+    },
+    historyAddComment: async (payload: HistoryAddCommentRequest) => {
+      const record = mockRunHistory.find((r) => r.id === payload.id);
+      if (!record) return null;
+      const text = payload.text.trim();
+      if (!text && !payload.verdict) return null;
+      record.comments.unshift({
+        id: `mock-comment-${Date.now()}`,
+        text,
+        createdAt: Date.now(),
+        verdict: payload.verdict,
+      });
+      return record;
+    },
+    historyFinalize: async (payload: HistoryFinalizeRequest) => {
+      const record =
+        mockRunHistory.find((r) => r.id === payload.id) ??
+        mockRunHistory.sort((a, b) => b.createdAt - a.createdAt)[0];
+      if (!record) return null;
+      const finalPrompt = payload.finalPrompt.trim();
+      if (!finalPrompt) return null;
+      record.output.finalPrompt = finalPrompt;
+      record.actions = {
+        ...record.actions,
+        edited: finalPrompt !== record.output.optimizedPrompt || record.actions?.edited,
+        ...(payload.action === "apply" ? { applied: true } : { copied: true }),
+      };
+      return record;
+    },
+    historyAnalysisPath: async () => "(browser mock — run-history.jsonl unavailable)",
 
     sessionList: async () => [...mockSessions].sort((a, b) => b.updatedAt - a.updatedAt),
     sessionCreate: async (projectId?: string | null) => {
@@ -196,11 +232,15 @@ function createBrowserMock(): PromptForgeAPI {
         project.contextText = clamped;
         project.title = deriveProjectTitle(project.contextText, project.createdAt);
         project.updatedAt = now;
+        if (!project.color) {
+          project.color = assignProjectColor(mockProjects.map((p) => p.color).filter(Boolean));
+        }
       } else {
         project = {
           id: `mock-proj-${now}-${mockProjects.length}`,
           title: deriveProjectTitle(clamped, now),
           contextText: clamped,
+          color: assignProjectColor(mockProjects.map((p) => p.color).filter(Boolean)),
           createdAt: now,
           updatedAt: now,
         };

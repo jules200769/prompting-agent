@@ -107,12 +107,23 @@ describe("project library", () => {
     expect(store.getActiveProjectId()).toBe(created.id);
     expect(store.getProjectContext()).toBe("1. PROJECT — First library entry");
     expect(created.title).toBe("First library entry");
+    expect(created.color).toBeTruthy();
 
     const updated = store.upsertActiveProject("1. PROJECT — Updated library entry");
     expect(updated.id).toBe(created.id);
+    expect(updated.color).toBe(created.color);
     expect(store.listProjects()).toHaveLength(1);
     expect(updated.title).toBe("Updated library entry");
     expect(store.getProjectContext()).toBe("1. PROJECT — Updated library entry");
+  });
+
+  it("assigns a distinct color to each newly created project", () => {
+    const a = store.upsertActiveProject("1. PROJECT — Alpha");
+    store.setActiveProject(null);
+    const b = store.upsertActiveProject("1. PROJECT — Beta");
+    store.setActiveProject(null);
+    const c = store.upsertActiveProject("1. PROJECT — Gamma");
+    expect(new Set([a.color, b.color, c.color]).size).toBe(3);
   });
 
   it("setActiveProject syncs projectContext; null clears both", () => {

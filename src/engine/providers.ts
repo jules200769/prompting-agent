@@ -89,7 +89,7 @@ CONSTRAINT FRAMING (Level 3+):
 GPT-5.5 OUTCOME-FIRST (mandatory):
 - Shorter, outcome-oriented paste prompts — no legacy process stacks
 - Never add # Personality, # Collaboration, Role:, # Goal, or # Stop rules blocks to the refined prompt
-- Level 2–3: no phased workflows, success criteria, or examples unless Level 4 explicitly requires them
+- Level 2–4: no phased workflows, success criteria, or examples at levels below Max; at Max, success criteria only — never examples or illustrative samples
 `
       : "";
   const composerStructureRule =
@@ -98,7 +98,7 @@ GPT-5.5 OUTCOME-FIRST (mandatory):
 COMPOSER 2.5 (mandatory):
 - Level 2: Goal + Context + Input only — never Process, Constraints, Output format, Examples, or Success criteria
 - Level 3: Goal, Context, Constraints, Output format — no Examples or Success criteria
-- Level 4: all Level 3 blocks plus Examples and Success criteria
+- Level 4: all Level 3 blocks plus Success criteria only — never Examples or illustrative samples
 - When the user says fix/implement/build: Goal must demand direct implementation, not "propose a plan and wait for approval" on simple tasks
 - Include React/TypeScript stack hints in Context when the user mentioned them; never invent file paths or component names
 `
@@ -120,7 +120,7 @@ GEMINI 3 (mandatory):
 - Level 2: Persona (optional one line) + Task + Input only
 - Level 3+: block order is Context → Task → Output → Constraints (Constraints MUST be last)
 - Never use blanket "do not infer" / "do not guess" — use positive grounding instructions instead
-- Level 3: no Examples or Success criteria; those are Level 4 only
+- Level 3: no Examples or Success criteria; Level 4 adds Success criteria only — never Examples
 `
       : "";
 
@@ -162,7 +162,8 @@ ${personaLine}${personaLine ? "\n" : ""}${contextLine}
 
 OUTPUT RULES (strict):
 - Preserve the user's intent and facts; do not invent details about their situation
-${params.terminalContext ? "- ONE line only — no \\n or paragraph breaks anywhere in the output" : "- Follow the STRUCTURE CONTRACT exactly for this level — Cool must stay plain prose; Max must keep all Level 3 section tags plus examples and success criteria"}
+- Never add examples, few-shot samples, worked examples, or illustrative sample content at any level — no <examples>, ## Examples, EXAMPLES:, or similar
+${params.terminalContext ? "- ONE line only — no \\n or paragraph breaks anywhere in the output" : "- Follow the STRUCTURE CONTRACT exactly for this level — Cool must stay plain prose; Max must keep all Level 3 section tags plus success criteria (never examples)"}
 - Destination and standing context are grounding only: include relevant pieces inside the contracted structure; never drop, soften, or swap the selected ${pack.label} guide rules because context is missing or abundant
 - Return ONLY the refined prompt as plain text
 - No JSON, no markdown fences, no commentary, no scores, no preamble like "Here is..."

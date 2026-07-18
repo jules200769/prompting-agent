@@ -2,7 +2,7 @@
 // call the same optimize/settings path as Electron IPC (no capture/inject).
 
 import { createServer, type IncomingMessage } from "node:http";
-import type { OptimizeRequest, OptimizeResult } from "../shared/types";
+import type { OptimizeRequest, OptimizeWithRunId } from "../shared/types";
 import { runOptimize } from "./optimizeHandler";
 import * as store from "./storage";
 
@@ -24,7 +24,7 @@ function sendJson(res: import("node:http").ServerResponse, status: number, body:
 
 function writeNdjson(
   res: import("node:http").ServerResponse,
-  line: { type: "chunk"; data: string } | { type: "done"; data: OptimizeResult },
+  line: { type: "chunk"; data: string } | { type: "done"; data: OptimizeWithRunId },
 ): void {
   res.write(`${JSON.stringify(line)}\n`);
 }
@@ -67,7 +67,7 @@ export function startDevBridge(): void {
 
         const result = await runOptimize(body, (chunk) => {
           writeNdjson(res, { type: "chunk", data: chunk });
-        });
+        }, "dev");
         writeNdjson(res, { type: "done", data: result });
         res.end();
         return;
