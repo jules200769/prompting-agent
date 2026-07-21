@@ -8,6 +8,7 @@ import { DiffView } from "../components/DiffView";
 import { ToastProvider, useToast } from "../components/Toast";
 import { HotkeyField } from "../components/HotkeyField";
 import { ThemeGallery } from "../components/ThemeGallery";
+import { ThemePreview } from "../components/ThemePreview";
 import { applyThemeToDocument } from "../../shared/themes";
 
 type Tab = "workbench" | "library" | "history" | "settings";
@@ -55,7 +56,7 @@ function StudioShell() {
       <aside className="studio-aside w-52 shrink-0 border-r flex flex-col">
         <div className="px-4 py-4 flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-accent" />
-          <span className="font-display font-semibold tracking-tight">Anvyll</span>
+          <span className="font-brand font-semibold tracking-tight">Anvyll</span>
         </div>
         <nav className="px-2 space-y-0.5">
           {(["workbench", "library", "history", "settings"] as Tab[]).map((t) => (
@@ -731,7 +732,12 @@ function Settings() {
               />
               <p className="text-[10px] text-muted mt-2">Applies instantly. Save settings to keep your choice.</p>
             </Field>
-            <button onClick={save} className="px-4 py-2 rounded-md btn-accent text-sm font-medium">Save settings</button>
+            <div className="flex flex-wrap items-center gap-4">
+              <button onClick={save} className="px-4 py-2 rounded-md btn-accent text-sm font-medium shrink-0">
+                Save settings
+              </button>
+              <ThemePreview theme={s.theme} />
+            </div>
           </div>
         </section>
 
@@ -764,7 +770,7 @@ function Settings() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="text-[11px] uppercase tracking-wider text-muted">{label}</span>
+      <span className="text-[11px] uppercase tracking-wider text-muted font-display">{label}</span>
       <div className="mt-1">{children}</div>
     </label>
   );

@@ -28,8 +28,27 @@ describe("themes", () => {
     }
   });
 
-  it("keeps overlay dark when ash-paper is selected", () => {
-    expect(resolveOverlayTheme("ash-paper")).toBe("ember-forge");
+  it("passes every theme through to the overlay, including ash-paper", () => {
+    expect(resolveOverlayTheme("ash-paper")).toBe("ash-paper");
+    expect(resolveOverlayTheme("ember-forge")).toBe("ember-forge");
     expect(resolveOverlayTheme("cool-temper")).toBe("cool-temper");
+  });
+
+  it("defines display and body fonts for every forge template", () => {
+    const expected: Record<string, { fontDisplay: string; fontSans: string }> = {
+      "ember-forge": { fontDisplay: "Bahnschrift", fontSans: "IBM Plex Sans" },
+      "forged-steel": { fontDisplay: "Barlow Condensed", fontSans: "IBM Plex Sans" },
+      "white-hot": { fontDisplay: "Oswald", fontSans: "IBM Plex Sans" },
+      "ash-paper": { fontDisplay: "Instrument Serif", fontSans: "DM Sans" },
+      "cool-temper": { fontDisplay: "Space Grotesk", fontSans: "IBM Plex Sans" },
+      "midnight-anvil": { fontDisplay: "Bahnschrift", fontSans: "IBM Plex Sans" },
+      "crimson-shop": { fontDisplay: "Oswald", fontSans: "IBM Plex Sans" },
+      "tempered-green": { fontDisplay: "Outfit", fontSans: "Outfit" },
+    };
+
+    for (const meta of THEME_META) {
+      expect(meta.fontDisplay).toBe(expected[meta.id].fontDisplay);
+      expect(meta.fontSans).toBe(expected[meta.id].fontSans);
+    }
   });
 });

@@ -26,8 +26,9 @@ module.exports = {
         muted: "var(--muted)",
       },
       fontFamily: {
-        sans: ["Segoe UI Variable Text", "Segoe UI", "system-ui", "sans-serif"],
-        display: [
+        sans: ["var(--font-sans)"],
+        display: ["var(--font-display)"],
+        brand: [
           "Bahnschrift",
           "DIN Alternate",
           "Franklin Gothic Medium",

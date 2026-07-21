@@ -1,3 +1,4 @@
+@import "./assets/fonts/fonts.css";
 @import "./themes.css";
 
 @tailwind base;
@@ -13,7 +14,7 @@ body,
 }
 
 body {
-  font-family: theme("fontFamily.sans");
+  font-family: var(--font-sans);
   color: var(--ink);
   user-select: none;
   background: transparent;
@@ -68,6 +69,19 @@ body {
     0 6px 18px rgba(0, 0, 0, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
     inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Overlay modal — thin theme-colored edge glow (idle; capture-wait overrides). */
+.apple-glass--edge-glow:not(.apple-glass--capture-wait) {
+  border-color: rgba(var(--glow-soft-rgb), 0.36);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.48),
+    0 6px 18px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+    0 0 0 1px rgba(var(--glow-rgb), 0.22),
+    0 0 8px rgba(var(--glow-rgb), 0.1);
+  transition: border-color 0.35s ease, box-shadow 0.35s ease;
 }
 
 /* Capture-wait: thin spectral border (internal) + soft outer aura (external).
@@ -354,7 +368,7 @@ select:focus-visible {
 }
 
 .overlay-font {
-  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .overlay-chrome {
@@ -367,18 +381,6 @@ select:focus-visible {
 
 .overlay-text-muted {
   color: var(--overlay-muted, var(--muted));
-}
-
-.overlay-ambient {
-  position: absolute;
-  inset: -20px -12px;
-  border-radius: 44px;
-  pointer-events: none;
-  z-index: 0;
-  background: var(--overlay-ambient);
-  opacity: 0.42;
-  filter: blur(14px);
-  transition: opacity 0.35s ease, background 0.35s ease;
 }
 
 .overlay-shell {
@@ -558,7 +560,7 @@ select {
 }
 
 .theme-card__label {
-  font-family: theme("fontFamily.display");
+  font-family: var(--font-display);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -570,6 +572,43 @@ select {
   font-size: 10px;
   line-height: 1.35;
   color: var(--muted);
+}
+
+/* Per-theme typography — display on headings/labels, sans on body (via --font-sans). */
+.studio-shell h2,
+.studio-shell h3 {
+  font-family: var(--font-display);
+}
+
+.studio-shell nav button {
+  font-family: var(--font-display);
+}
+
+.overlay-chrome .level-slider__label {
+  font-family: var(--font-display);
+}
+
+.theme-preview {
+  margin: 0;
+  flex: 0 0 auto;
+  width: 140px;
+}
+
+.theme-preview__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: transparent;
+}
+
+.theme-preview__caption {
+  margin-top: 4px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: var(--font-display);
+  text-align: center;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -586,9 +625,253 @@ select {
   .studio-shell::before {
     transition: none;
   }
+}
 
-  .overlay-ambient {
-    transition: none;
-    filter: none;
+@keyframes themeCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
   }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Browser overlay preview desk — adapts so light skins read correctly */
+.overlay-preview-desk {
+  background: radial-gradient(120% 120% at 20% 0%, #472a27 0%, #241514 55%, #170d0d 100%);
+}
+
+html[data-theme="ash-paper"] .overlay-preview-desk {
+  background:
+    radial-gradient(ellipse 80% 50% at 70% 0%, rgba(194, 169, 160, 0.35) 0%, transparent 55%),
+    linear-gradient(165deg, #e5d7cc 0%, #c2a9a0 48%, #a89088 100%);
+}
+
+/*
+ * Ash Paper overlay — dusty taupe paper (#f8f5f0 / #e5d7cc / #c2a9a0).
+ * Remaps hard-coded white/black utility opacities used by overlay chrome.
+ */
+html[data-theme="ash-paper"] .apple-glass {
+  border: 1px solid var(--overlay-hairline);
+  box-shadow:
+    inset 0 1px 0 rgba(248, 245, 240, 0.7),
+    inset 0 -1px 0 rgba(194, 169, 160, 0.35);
+}
+
+html[data-theme="ash-paper"] .apple-glass--edge-glow:not(.apple-glass--capture-wait) {
+  border-color: rgba(var(--glow-soft-rgb), 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(248, 245, 240, 0.75),
+    inset 0 -1px 0 rgba(194, 169, 160, 0.3),
+    0 0 0 1px rgba(var(--glow-rgb), 0.28),
+    0 0 16px rgba(var(--glow-soft-rgb), 0.1);
+}
+
+html[data-theme="ash-paper"] .apple-glass--capture-wait {
+  box-shadow:
+    inset 0 1px 0 rgba(248, 245, 240, 0.75),
+    inset 0 -1px 0 rgba(194, 169, 160, 0.3);
+}
+
+html[data-theme="ash-paper"] .apple-glass::before {
+  background: linear-gradient(
+    155deg,
+    rgba(248, 245, 240, 0.55) 0%,
+    rgba(229, 215, 204, 0.22) 34%,
+    rgba(194, 169, 160, 0.08) 62%,
+    transparent 82%
+  );
+}
+
+html[data-theme="ash-paper"] .apple-glass::after {
+  background: linear-gradient(
+    0deg,
+    rgba(194, 169, 160, 0.28) 0%,
+    rgba(194, 169, 160, 0.08) 40%,
+    transparent 70%
+  );
+}
+
+html[data-theme="ash-paper"] .apple-glass-panel {
+  background: var(--overlay-panel-bg);
+  border: 1px solid rgba(194, 169, 160, 0.45);
+  box-shadow:
+    inset 0 1px 3px rgba(90, 60, 52, 0.08),
+    inset 0 0 0 1px rgba(248, 245, 240, 0.35);
+}
+
+html[data-theme="ash-paper"] .apple-glass-panel:focus-within {
+  box-shadow:
+    inset 0 1px 3px rgba(90, 60, 52, 0.08),
+    0 0 0 2px rgba(var(--glow-soft-rgb), 0.35);
+}
+
+html[data-theme="ash-paper"] .apple-glass-menu {
+  background: var(--overlay-menu-bg);
+  border: 1px solid rgba(194, 169, 160, 0.5);
+  box-shadow:
+    0 16px 36px rgba(90, 60, 52, 0.2),
+    0 2px 8px rgba(90, 60, 52, 0.1);
+  color: var(--overlay-ink);
+}
+
+html[data-theme="ash-paper"] .apple-glass-pill:not(.apple-glass-pill--accent) {
+  background: #f8f5f0;
+  border-color: rgba(194, 169, 160, 0.55);
+  box-shadow:
+    0 1px 2px rgba(90, 60, 52, 0.08),
+    inset 0 1px 0 rgba(248, 245, 240, 0.9);
+}
+
+html[data-theme="ash-paper"] .apple-glass-pill:hover:not(:disabled):not(.apple-glass-pill--accent) {
+  background: #fffefb;
+  border-color: rgba(160, 120, 108, 0.45);
+}
+
+html[data-theme="ash-paper"] .apple-glass-pill:focus-visible,
+html[data-theme="ash-paper"] button:focus-visible,
+html[data-theme="ash-paper"] select:focus-visible {
+  outline-color: rgba(var(--glow-soft-rgb), 0.55);
+}
+
+html[data-theme="ash-paper"] .apple-glass-tab--top::before,
+html[data-theme="ash-paper"] .apple-glass-tab--bottom::before {
+  background-image: url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none' viewBox='0 0 100 40'><defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='%23F8F5F0' stop-opacity='0.98'/><stop offset='1' stop-color='%23C2A9A0' stop-opacity='0.98'/></linearGradient></defs><path d='M0 40 C10 40 16 0 26 0 L74 0 C84 0 90 40 100 40 Z' fill='url(%23g)' stroke='rgba(160,120,108,0.35)' vector-effect='non-scaling-stroke'/></svg>");
+  filter: none;
+}
+
+html[data-theme="ash-paper"] .apple-glass-tab--left::before {
+  background-image: url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none' viewBox='0 0 40 100'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='0'><stop offset='0' stop-color='%23F8F5F0' stop-opacity='0.98'/><stop offset='1' stop-color='%23C2A9A0' stop-opacity='0.98'/></linearGradient></defs><path d='M40 0 C40 8 0 12 0 22 L0 78 C0 88 40 92 40 100 Z' fill='url(%23g)' stroke='rgba(160,120,108,0.35)' vector-effect='non-scaling-stroke'/></svg>");
+  filter: none;
+}
+
+html[data-theme="ash-paper"] .level-slider__lane {
+  background: rgba(194, 169, 160, 0.45);
+}
+
+html[data-theme="ash-paper"] .level-slider__track:focus-visible .level-slider__lane {
+  box-shadow: 0 0 0 3px rgba(var(--glow-soft-rgb), 0.28);
+}
+
+html[data-theme="ash-paper"] .level-slider__thumb {
+  background: radial-gradient(circle at 35% 28%, #f8f5f0 0%, #e5d7cc 70%, #c2a9a0 100%);
+  box-shadow:
+    0 2px 6px rgba(90, 60, 52, 0.28),
+    0 0 0 1px rgba(248, 245, 240, 0.7) inset;
+}
+
+html[data-theme="ash-paper"] .overlay-placement {
+  border-color: rgba(194, 169, 160, 0.55);
+  background: rgba(194, 169, 160, 0.22);
+}
+
+html[data-theme="ash-paper"] .overlay-placement__zone {
+  border-color: rgba(160, 120, 108, 0.4);
+  background: rgba(248, 245, 240, 0.55);
+}
+
+html[data-theme="ash-paper"] .overlay-placement__zone:hover {
+  background: rgba(248, 245, 240, 0.8);
+  border-color: rgba(160, 120, 108, 0.55);
+}
+
+html[data-theme="ash-paper"] .overlay-placement__zone:focus-visible {
+  outline-color: rgba(var(--glow-soft-rgb), 0.55);
+}
+
+/* Remap white/black Tailwind opacities → ink-on-ash within overlay surfaces */
+html[data-theme="ash-paper"] #root.overlay-root :is(
+  .text-white,
+  .text-white\/80,
+  .text-white\/85
+) {
+  color: rgb(61 46 42 / 0.92);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.text-white\/70, .text-white\/75) {
+  color: rgb(61 46 42 / 0.72);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.text-white\/55, .text-white\/50) {
+  color: rgb(61 46 42 / 0.55);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.text-white\/45, .text-white\/40) {
+  color: rgb(61 46 42 / 0.45);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .text-white\/30 {
+  color: rgb(61 46 42 / 0.32);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .hover\:text-white:hover {
+  color: rgb(61 46 42 / 0.95);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .hover\:text-white\/85:hover {
+  color: rgb(61 46 42 / 0.85);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .hover\:text-white\/75:hover {
+  color: rgb(61 46 42 / 0.75);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .hover\:text-white\/70:hover {
+  color: rgb(61 46 42 / 0.7);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .hover\:text-white\/65:hover {
+  color: rgb(61 46 42 / 0.65);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.bg-white\/5, .bg-white\/\[\.06\], .hover\:bg-white\/\[\.06\]:hover) {
+  background-color: rgb(194 169 160 / 0.18);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.bg-white\/10, .hover\:bg-white\/10:hover) {
+  background-color: rgb(194 169 160 / 0.28);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.bg-white\/15, .hover\:bg-white\/15:hover) {
+  background-color: rgb(194 169 160 / 0.36);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.bg-white\/20, .hover\:bg-white\/20:hover) {
+  background-color: rgb(194 169 160 / 0.42);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.bg-white\/25, .hover\:bg-white\/25:hover) {
+  background-color: rgb(229 215 204 / 0.85);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(.bg-white\/30, .hover\:bg-white\/30:hover) {
+  background-color: rgb(248 245 240 / 0.9);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root :is(
+  .border-white\/10,
+  .border-white\/15,
+  .border-white\/20,
+  .border-white\/30
+) {
+  border-color: rgb(194 169 160 / 0.55);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .ring-white\/20 {
+  --tw-ring-color: rgb(194 169 160 / 0.45);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .bg-black\/25 {
+  background-color: rgb(194 169 160 / 0.22);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .placeholder\:text-white\/40::placeholder,
+html[data-theme="ash-paper"] #root.overlay-root .placeholder\:text-white\/50::placeholder {
+  color: rgb(61 46 42 / 0.42);
+}
+
+html[data-theme="ash-paper"] #root.overlay-root .focus-visible\:outline-white\/30:focus-visible {
+  outline-color: rgb(160 120 108 / 0.4);
 }

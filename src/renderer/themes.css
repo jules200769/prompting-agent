@@ -39,7 +39,11 @@
   --overlay-pill-hover: rgba(255, 255, 255, 0.2);
   --overlay-panel-bg: rgba(10, 8, 6, 0.58);
   --overlay-menu-bg: rgba(30, 26, 23, 0.93);
-  --overlay-ambient: radial-gradient(ellipse 90% 70% at 50% 38%, rgba(255, 90, 31, 0.11) 0%, rgba(199, 57, 21, 0.04) 38%, transparent 58%);
+  --overlay-dot-fallback: rgba(255, 255, 255, 0.25);
+  --overlay-shadow: rgba(0, 0, 0, 0.48);
+  --overlay-hairline: rgba(255, 255, 255, 0.28);
+  --font-display: "Bahnschrift", "Archivo Narrow", "DIN Alternate", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 [data-theme="forged-steel"] {
@@ -71,6 +75,8 @@
   --scroll-thumb: rgba(207, 210, 212, 0.28);
   --scroll-thumb-hover: rgba(207, 210, 212, 0.45);
   --focus-ring: rgba(182, 187, 190, 0.55);
+  --font-display: "Barlow Condensed", "Bahnschrift", "Arial Narrow", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 [data-theme="white-hot"] {
@@ -103,6 +109,8 @@
   --scroll-thumb: rgba(255, 235, 59, 0.28);
   --scroll-thumb-hover: rgba(255, 235, 59, 0.45);
   --focus-ring: rgba(255, 152, 0, 0.55);
+  --font-display: "Oswald", "Bahnschrift", "Arial Narrow", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 [data-theme="ash-paper"] {
@@ -121,19 +129,33 @@
   --ok: #1e8a5e;
   --warn: #d98a00;
   --bad: #c93a3f;
-  --glass-top: rgba(46, 40, 35, 0.92);
-  --glass-mid: rgba(30, 26, 23, 0.9);
-  --glass-bot: rgba(20, 17, 16, 0.94);
-  --glass-solid: rgb(30, 26, 23);
-  --glow-rgb: 255, 122, 61;
-  --glow-soft-rgb: 224, 78, 18;
-  --glow-cyan-rgb: 255, 178, 70;
-  --hero-gradient: radial-gradient(ellipse 90% 60% at 85% 10%, rgba(224, 78, 18, 0.08) 0%, transparent 50%),
-    linear-gradient(180deg, #faf6ee 0%, #f7f3ed 50%, #f1ebe2 100%);
-  --wordmark-gradient: linear-gradient(180deg, #ff7a3d 0%, #e04e12 100%);
-  --scroll-thumb: rgba(32, 27, 22, 0.18);
-  --scroll-thumb-hover: rgba(32, 27, 22, 0.32);
-  --focus-ring: rgba(224, 78, 18, 0.45);
+  /* Dusty ash paper — #f8f5f0 / #e5d7cc / #c2a9a0 (not bright cream) */
+  --glass-top: rgba(248, 245, 240, 0.96);
+  --glass-mid: rgba(229, 215, 204, 0.94);
+  --glass-bot: rgba(194, 169, 160, 0.88);
+  --glass-solid: #e5d7cc;
+  --glow-rgb: 194, 169, 160;
+  --glow-soft-rgb: 160, 120, 108;
+  --glow-cyan-rgb: 229, 215, 204;
+  --hero-gradient: radial-gradient(ellipse 90% 60% at 85% 10%, rgba(194, 169, 160, 0.22) 0%, transparent 50%),
+    linear-gradient(180deg, #f8f5f0 0%, #e5d7cc 55%, #c2a9a0 100%);
+  --wordmark-gradient: linear-gradient(180deg, #8a6a60 0%, #6b4f48 55%, #4a3530 100%);
+  --scroll-thumb: rgba(74, 53, 48, 0.22);
+  --scroll-thumb-hover: rgba(74, 53, 48, 0.36);
+  --focus-ring: rgba(160, 120, 108, 0.5);
+  --overlay-ink: #3d2e2a;
+  --overlay-muted: rgba(61, 46, 42, 0.52);
+  --overlay-subtle: rgba(61, 46, 42, 0.08);
+  --overlay-pill-bg: rgba(248, 245, 240, 0.72);
+  --overlay-pill-border: rgba(194, 169, 160, 0.55);
+  --overlay-pill-hover: rgba(248, 245, 240, 0.92);
+  --overlay-panel-bg: rgba(194, 169, 160, 0.28);
+  --overlay-menu-bg: rgba(248, 245, 240, 0.97);
+  --overlay-dot-fallback: rgba(61, 46, 42, 0.28);
+  --overlay-shadow: rgba(90, 60, 52, 0.22);
+  --overlay-hairline: rgba(194, 169, 160, 0.65);
+  --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-sans: "DM Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 [data-theme="cool-temper"] {
@@ -165,6 +187,8 @@
   --scroll-thumb: rgba(168, 196, 216, 0.28);
   --scroll-thumb-hover: rgba(168, 196, 216, 0.45);
   --focus-ring: rgba(79, 163, 255, 0.5);
+  --font-display: "Space Grotesk", "Bahnschrift", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 [data-theme="midnight-anvil"] {
@@ -196,6 +220,8 @@
   --scroll-thumb: rgba(241, 234, 225, 0.2);
   --scroll-thumb-hover: rgba(241, 234, 225, 0.35);
   --focus-ring: rgba(241, 234, 225, 0.4);
+  --font-display: "Bahnschrift", "DIN Alternate", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 [data-theme="crimson-shop"] {
@@ -227,6 +253,8 @@
   --scroll-thumb: rgba(229, 72, 77, 0.28);
   --scroll-thumb-hover: rgba(229, 72, 77, 0.45);
   --focus-ring: rgba(201, 0, 11, 0.55);
+  --font-display: "Oswald", "Bahnschrift", "Arial Narrow", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 [data-theme="tempered-green"] {
@@ -258,6 +286,8 @@
   --scroll-thumb: rgba(143, 212, 176, 0.28);
   --scroll-thumb-hover: rgba(143, 212, 176, 0.45);
   --focus-ring: rgba(63, 176, 127, 0.5);
+  --font-display: "Outfit", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Outfit", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
 
 html {
@@ -269,40 +299,34 @@ html[data-theme="ash-paper"] {
   color-scheme: light;
 }
 
-/* Overlay chrome overrides per forge skin (modal stays dark glass). */
+/* Overlay chrome overrides per forge skin. */
 [data-theme="forged-steel"] {
-  --overlay-ambient: radial-gradient(ellipse 85% 65% at 55% 32%, rgba(182, 187, 190, 0.1) 0%, rgba(146, 141, 171, 0.04) 40%, transparent 58%);
   --overlay-panel-bg: rgba(16, 14, 22, 0.58);
   --overlay-menu-bg: rgba(31, 28, 44, 0.93);
 }
 
 [data-theme="white-hot"] {
-  --overlay-ambient: radial-gradient(circle at 45% 30%, rgba(255, 248, 231, 0.12) 0%, rgba(255, 152, 0, 0.06) 35%, transparent 55%);
   --overlay-panel-bg: rgba(12, 10, 6, 0.6);
   --overlay-pill-bg: rgba(255, 235, 59, 0.1);
   --overlay-pill-border: rgba(255, 235, 59, 0.22);
 }
 
 [data-theme="cool-temper"] {
-  --overlay-ambient: radial-gradient(ellipse 85% 65% at 40% 28%, rgba(79, 163, 255, 0.09) 0%, rgba(83, 90, 97, 0.04) 42%, transparent 58%);
   --overlay-panel-bg: rgba(12, 14, 20, 0.58);
   --overlay-menu-bg: rgba(34, 37, 47, 0.93);
 }
 
 [data-theme="midnight-anvil"] {
-  --overlay-ambient: radial-gradient(ellipse 80% 60% at 50% 22%, rgba(65, 67, 69, 0.14) 0%, rgba(20, 17, 16, 0.05) 45%, transparent 58%);
   --overlay-panel-bg: rgba(6, 5, 4, 0.62);
   --overlay-pill-bg: rgba(255, 255, 255, 0.08);
 }
 
 [data-theme="crimson-shop"] {
-  --overlay-ambient: radial-gradient(ellipse 85% 65% at 60% 32%, rgba(201, 0, 11, 0.1) 0%, rgba(115, 32, 31, 0.04) 40%, transparent 58%);
   --overlay-panel-bg: rgba(18, 6, 6, 0.6);
   --overlay-menu-bg: rgba(42, 16, 16, 0.93);
 }
 
 [data-theme="tempered-green"] {
-  --overlay-ambient: radial-gradient(ellipse 85% 65% at 35% 28%, rgba(63, 176, 127, 0.09) 0%, rgba(30, 61, 47, 0.05) 42%, transparent 58%);
   --overlay-panel-bg: rgba(8, 14, 10, 0.58);
   --overlay-menu-bg: rgba(20, 32, 24, 0.93);
 }

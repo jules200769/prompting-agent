@@ -325,7 +325,7 @@ function ContextBar({
     >
       <span
         className="h-2 w-2 shrink-0 rounded-full"
-        style={{ backgroundColor: project?.color ?? "rgba(255,255,255,.25)" }}
+        style={{ backgroundColor: project?.color ?? "var(--overlay-dot-fallback)" }}
         aria-hidden
       />
       <span className="shrink-0 max-w-[40%] truncate text-white/45">{projectName}</span>
@@ -1047,13 +1047,12 @@ export function Overlay() {
         {phaseAnnouncement}
       </div>
       <div ref={shellRef} className={`overlay-shell relative w-full max-w-[578px] ${shellVisible ? "" : "invisible"}`}>
-        <div className="overlay-ambient" aria-hidden />
         {/* Folder tabs — tucked behind the card (z-0 under the card's z-10) for depth. */}
         <div
           className="apple-glass-tab apple-glass-tab--left -left-[26px] top-1/2 -translate-y-1/2 w-[36px] h-[158px] flex items-center justify-start pl-[7px]"
           aria-hidden
         >
-          <span className="overlay-wordmark text-[10px] font-bold select-none">
+          <span className="overlay-wordmark font-brand text-[10px] font-bold select-none">
             ANVYLL.AI
           </span>
         </div>
@@ -1081,7 +1080,7 @@ export function Overlay() {
           <div aria-hidden className="apple-glass-capture-aura" />
         )}
         <div
-          className={`apple-glass overlay-chrome relative z-10 rounded-[34px] w-full p-4${
+          className={`apple-glass apple-glass--edge-glow overlay-chrome relative z-10 rounded-[34px] w-full p-4${
             captureGlowOn ? " apple-glass--capture-wait" : ""
           }`}
         >

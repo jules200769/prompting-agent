@@ -21,14 +21,7 @@ function route(): "studio" | "overlay-preview" | "onboarding" | "overlay" {
 function OverlayPreview() {
   return (
     <div className="fixed inset-0 overflow-hidden">
-      <div
-        aria-hidden
-        className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(120% 120% at 20% 0%, #472a27 0%, #241514 55%, #170d0d 100%)",
-        }}
-      />
+      <div aria-hidden className="overlay-preview-desk absolute inset-0" />
       <div className="absolute left-1/2 top-4 -translate-x-1/2 z-20 rounded-full bg-black/40 px-3 py-1 text-xs font-medium text-white/70 backdrop-blur">
         Overlay preview (browser — optimize via Electron dev bridge)
       </div>
