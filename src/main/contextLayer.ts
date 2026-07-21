@@ -144,6 +144,6 @@ export function harvestFileMemory(title: string | undefined, processName: string
     const file = extractFileFromEditorTitle(title, processName);
     if (file) recordFileMemory([file]);
   } catch (err) {
-    console.warn("[PromptForge] harvestFileMemory failed:", err);
+    console.warn("[Anvyll] harvestFileMemory failed:", err);
   }
 }

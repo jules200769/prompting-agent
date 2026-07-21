@@ -256,7 +256,7 @@ export function resolveStyleDirective(opts: {
 
 /**
  * Known source-file extensions. Only names ending in one of these count as a
- * file for context — keeps workspace names (Anvyl.ai) and vague dotted tokens
+ * file for context — keeps workspace names (anvyll.app) and vague dotted tokens
  * (foo.bar) out. Markdown is intentionally absent (handled by
  * isExcludedContextFileName so plans/docs never reach file context).
  */
@@ -279,7 +279,7 @@ export function hasSourceFileExtension(name: string): boolean {
 /**
  * Wispr rule tightened with a source-extension whitelist: contains a dot, no
  * whitespace, starts with a letter, ≤80 chars, no path chars, and ends in a
- * known source extension (so "Anvyl.ai" / "foo.bar" are rejected).
+ * known source extension (so "anvyll.app" / "foo.bar" are rejected).
  */
 export function isLikelyFileName(token: string): boolean {
   const t = token.trim();

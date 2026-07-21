@@ -1,5 +1,5 @@
-# PromptForge — Prompt guide kalibratie (alle modellen)
-You are calibrating **PromptForge**'s rewrite pipeline for every target model in `prompting-guides/`. The rewrite always uses OpenAI **GPT-4.1 mini**; the target model picker selects which guide + structure contract apply.
+# Anvyll — Prompt guide kalibratie (alle modellen)
+You are calibrating **Anvyll**'s rewrite pipeline for every target model in `prompting-guides/`. The rewrite always uses OpenAI **GPT-4.1 mini**; the target model picker selects which guide + structure contract apply.
 Reference session: `cursor_ai_prompt_engineering_session.md` (Opus 4.8 — completed except final Max L4 API validation).
 ## Mission
 For each target model: research official prompting guidance → run standardized tests → analyze outputs → fix `guideLoader.ts` / `providers.ts` if needed → re-test → document scorecard.

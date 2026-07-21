@@ -1,6 +1,7 @@
 // Preload: exposes a tight allowlist IPC API to the renderer. No Node globals leak.
 import { contextBridge, ipcRenderer } from "electron";
 import { IPC, type OptimizeRequest, type AppSettings, type CaptureContext, type CaptureMode, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type InjectResult, type OverlayPlacement, type Provider, type RunRecord, type SettingsSetResult, type WorkbenchSeed } from "../shared/types";
+import type { ThemeId } from "../shared/themes";
 import type { ContextImportScope } from "../shared/contextImportPrompt";
 import type { ProjectContext, SessionContext } from "../shared/session";
 
@@ -10,7 +11,7 @@ type OverlayShowPayload = {
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
   context?: CaptureContext;
-  /** ANVYL summary detected on the clipboard at delivery — drives the consent toast. */
+  /** Anvyll summary detected on the clipboard at delivery — drives the consent toast. */
   clipboardSummary?: { scope: ContextImportScope; text: string };
 };
 
@@ -23,13 +24,13 @@ let lastOverlayCapturePending = false;
 function deliverOverlayShow(payload: OverlayShowPayload): void {
   lastOverlayShow = payload;
   lastOverlayCapturePending = false;
-  window.dispatchEvent(new CustomEvent("promptforge:capture", { detail: payload }));
+  window.dispatchEvent(new CustomEvent("anvyll:capture", { detail: payload }));
   for (const cb of overlayShowCallbacks) cb(payload);
 }
 
 function deliverOverlayCapturePending(): void {
   lastOverlayCapturePending = true;
-  window.dispatchEvent(new CustomEvent("promptforge:capture:pending"));
+  window.dispatchEvent(new CustomEvent("anvyll:capture:pending"));
   for (const cb of overlayCapturePendingCallbacks) cb();
 }
 
@@ -56,6 +57,12 @@ ipcRenderer.on(IPC.STUDIO_WORKBENCH_SEED, (_e, seed: WorkbenchSeed) => {
   for (const cb of workbenchSeedCallbacks) cb(seed);
 });
 
+const settingsChangedCallbacks = new Set<(theme: ThemeId) => void>();
+ipcRenderer.on(IPC.SETTINGS_CHANGED, (_e, payload: { theme: ThemeId }) => {
+  window.dispatchEvent(new CustomEvent("anvyll:settings:changed", { detail: payload }));
+  for (const cb of settingsChangedCallbacks) cb(payload.theme);
+});
+
 const api = {
   optimize: (req: OptimizeRequest, onText: (chunk: string) => void) => {
     const listener = (_e: unknown, chunk: string) => onText(chunk);
@@ -73,13 +80,14 @@ const api = {
 
   settingsGet: () => ipcRenderer.invoke(IPC.SETTINGS_GET) as Promise<AppSettings>,
   settingsSet: (s: AppSettings) => ipcRenderer.invoke(IPC.SETTINGS_SET, s) as Promise<SettingsSetResult>,
+  previewTheme: (theme: ThemeId) => ipcRenderer.send(IPC.SETTINGS_THEME_PREVIEW, theme),
   hotkeyStatus: () => ipcRenderer.invoke(IPC.HOTKEY_STATUS) as Promise<HotkeyStatus>,
 
   keysSet: (provider: Provider, key: string) => ipcRenderer.invoke(IPC.KEYS_SET, provider, key),
   keysHas: (provider: Provider) => ipcRenderer.invoke(IPC.KEYS_HAS, provider) as Promise<boolean>,
   keysDelete: (provider: Provider) => ipcRenderer.invoke(IPC.KEYS_DELETE, provider),
   keysProviders: () => ipcRenderer.invoke(IPC.KEYS_PROVIDERS) as Promise<Provider[]>,
-  keysIsSecure: () => ipcRenderer.invoke("promptforge:keys:secure") as Promise<boolean>,
+  keysIsSecure: () => ipcRenderer.invoke("anvyll:keys:secure") as Promise<boolean>,
 
   libraryList: () => ipcRenderer.invoke(IPC.LIBRARY_LIST),
   librarySave: (input: any) => ipcRenderer.invoke(IPC.LIBRARY_SAVE, input),
@@ -139,7 +147,7 @@ const api = {
 
   onStudioRoute: (cb: (route: string) => void): (() => void) => {
     const l = (_e: unknown, route: string) => {
-      window.dispatchEvent(new CustomEvent("promptforge:studio:route", { detail: route }));
+      window.dispatchEvent(new CustomEvent("anvyll:studio:route", { detail: route }));
       cb(route);
     };
     ipcRenderer.on(IPC.STUDIO_ROUTE, l);
@@ -170,8 +178,15 @@ const api = {
       overlayClearCallbacks.delete(cb);
     };
   },
+
+  onSettingsChanged: (cb: (theme: ThemeId) => void): (() => void) => {
+    settingsChangedCallbacks.add(cb);
+    return () => {
+      settingsChangedCallbacks.delete(cb);
+    };
+  },
 };
 
-contextBridge.exposeInMainWorld("promptforge", api);
+contextBridge.exposeInMainWorld("anvyll", api);
 
-export type PromptForgeAPI = typeof api;
+export type AnvyllAPI = typeof api;

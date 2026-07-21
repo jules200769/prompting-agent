@@ -9,7 +9,7 @@ const SESSION_SUMMARY = `1. GOAL — Ship the session/context UX redesign.
 5. TERMINOLOGY & NAMES — Overlay.tsx, ContextPanel.tsx, storage.ts.
 6. OPEN ITEMS — wire the clipboard toast.`;
 
-const PROJECT_SUMMARY = `1. PROJECT — PromptForge overlay for Windows.
+const PROJECT_SUMMARY = `1. PROJECT — Anvyll overlay for Windows.
 2. STACK & ARCHITECTURE — Electron, Vite, React, TypeScript.
 3. CONVENTIONS — English UI only; local JSON store.
 4. KEY FACTS & DECISIONS — main process owns the store.

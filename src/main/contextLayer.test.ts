@@ -67,7 +67,7 @@ describe("assembleCaptureContext file-context scenarios", () => {
   // Scenario A: Cursor chat pane — window title is the workspace, never a file.
   it("A: Cursor chat with workspace title yields no activeFile", () => {
     const ctx = capture(
-      { process: "cursor", windowTitle: "Anvyl.ai - Cursor", hostKind: "native" },
+      { process: "cursor", windowTitle: "anvyll.app - Cursor", hostKind: "native" },
       { className: "aislash-editor-input" },
     );
     expect(ctx?.app?.category).toBe("ai-chat");
@@ -112,7 +112,7 @@ describe("assembleCaptureContext file-context scenarios", () => {
   it("L: Cursor chat surfaces token-matched recentFiles without an activeFile", () => {
     fileMemory = ["contextLayer.ts", "Overlay.tsx"];
     const ctx = capture(
-      { process: "cursor", windowTitle: "Anvyl.ai - Cursor", hostKind: "native" },
+      { process: "cursor", windowTitle: "anvyll.app - Cursor", hostKind: "native" },
       { className: "aislash-editor-input" },
       "please update contextLayer.ts to fix the bug",
     );

@@ -13,7 +13,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   }
 
   componentDidCatch(error: Error, info: any) {
-    console.error("[PromptForge] render error:", error, info);
+    console.error("[Anvyll] render error:", error, info);
   }
 
   reset = () => this.setState({ hasError: false, error: undefined });

@@ -10,7 +10,7 @@ vi.mock("electron", () => ({ app: { getPath: () => tmpDir } }));
 const store = await import("./storage");
 const { SESSIONS_MAX, SESSION_CONTEXT_MAX_CHARS, PROJECTS_MAX } = await import("../shared/session");
 
-const storeFile = () => join(tmpDir, "promptforge.store.json");
+const storeFile = () => join(tmpDir, "anvyll.store.json");
 
 beforeEach(() => {
   // Reset persisted session/project state between tests (module keeps a singleton).
@@ -236,7 +236,7 @@ describe("project library", () => {
   it("getActiveProjectId heals a dangling activeProjectId", async () => {
     const healDir = mkdtempSync(join(tmpdir(), "pf-project-heal-"));
     writeFileSync(
-      join(healDir, "promptforge.store.json"),
+      join(healDir, "anvyll.store.json"),
       JSON.stringify({
         settings: null,
         library: [],
@@ -256,7 +256,7 @@ describe("project library", () => {
     vi.doMock("electron", () => ({ app: { getPath: () => healDir } }));
     const healStore = await import("./storage");
     expect(healStore.getActiveProjectId()).toBeNull();
-    const onDisk = JSON.parse(readFileSync(join(healDir, "promptforge.store.json"), "utf8"));
+    const onDisk = JSON.parse(readFileSync(join(healDir, "anvyll.store.json"), "utf8"));
     expect(onDisk.activeProjectId).toBeNull();
     vi.doUnmock("electron");
     vi.resetModules();
@@ -267,7 +267,7 @@ describe("store migration", () => {
   it("a legacy store without session keys loads with defaults", async () => {
     const legacyDir = mkdtempSync(join(tmpdir(), "pf-session-legacy-"));
     writeFileSync(
-      join(legacyDir, "promptforge.store.json"),
+      join(legacyDir, "anvyll.store.json"),
       JSON.stringify({ settings: null, library: [], history: [], optCache: {}, optCacheOrder: [], fileMemory: [] }),
       "utf8",
     );
@@ -286,7 +286,7 @@ describe("store migration", () => {
   it("migrates a legacy projectContext string into the library and sets it active", async () => {
     const legacyDir = mkdtempSync(join(tmpdir(), "pf-project-legacy-"));
     writeFileSync(
-      join(legacyDir, "promptforge.store.json"),
+      join(legacyDir, "anvyll.store.json"),
       JSON.stringify({
         settings: null,
         library: [],
@@ -296,7 +296,7 @@ describe("store migration", () => {
         fileMemory: [],
         sessions: [],
         activeSessionId: null,
-        projectContext: "1. PROJECT — Legacy Anvyl app",
+        projectContext: "1. PROJECT — Legacy Anvyll app",
       }),
       "utf8",
     );
@@ -305,10 +305,10 @@ describe("store migration", () => {
     const legacyStore = await import("./storage");
     const projects = legacyStore.listProjects();
     expect(projects).toHaveLength(1);
-    expect(projects[0].title).toBe("Legacy Anvyl app");
+    expect(projects[0].title).toBe("Legacy Anvyll app");
     expect(legacyStore.getActiveProjectId()).toBe(projects[0].id);
-    expect(legacyStore.getProjectContext()).toBe("1. PROJECT — Legacy Anvyl app");
-    const onDisk = JSON.parse(readFileSync(join(legacyDir, "promptforge.store.json"), "utf8"));
+    expect(legacyStore.getProjectContext()).toBe("1. PROJECT — Legacy Anvyll app");
+    const onDisk = JSON.parse(readFileSync(join(legacyDir, "anvyll.store.json"), "utf8"));
     expect(onDisk.projects).toHaveLength(1);
     expect(onDisk.activeProjectId).toBe(projects[0].id);
     vi.doUnmock("electron");

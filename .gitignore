@@ -5,5 +5,5 @@ release
 *.log
 .env
 .env.local
-promptforge.db
-promptforge.db-journal
+anvyll.db
+anvyll.db-journal

@@ -99,8 +99,8 @@ describe("buildWritingMetaPrompt", () => {
   });
 
   it("includes standing context when provided", () => {
-    const { system } = build("email", 2, { context: "Works at Anvyl, Dutch B2B market" });
-    expect(system).toContain("Works at Anvyl, Dutch B2B market");
+    const { system } = build("email", 2, { context: "Works at Anvyll, Dutch B2B market" });
+    expect(system).toContain("Works at Anvyll, Dutch B2B market");
     expect(system).toContain("does not override type/level rules");
     expect(build("email", 2).system).not.toContain("Standing context");
   });

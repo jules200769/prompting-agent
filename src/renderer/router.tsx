@@ -26,7 +26,7 @@ function OverlayPreview() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(120% 120% at 20% 0%, #2b2f45 0%, #14151f 55%, #0a0a0f 100%)",
+            "radial-gradient(120% 120% at 20% 0%, #472a27 0%, #241514 55%, #170d0d 100%)",
         }}
       />
       <div className="absolute left-1/2 top-4 -translate-x-1/2 z-20 rounded-full bg-black/40 px-3 py-1 text-xs font-medium text-white/70 backdrop-blur">

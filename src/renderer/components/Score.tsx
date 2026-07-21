@@ -2,9 +2,9 @@ import type { SubScores } from "../../shared/types";
 import { RUBRIC_KEYS, RUBRIC_WEIGHTS } from "../../shared/types";
 
 function scoreColor(score: number): string {
-  if (score >= 75) return "#3fcf8e";
-  if (score >= 50) return "#f0b429";
-  return "#f0606b";
+  if (score >= 75) return "#fffb97";
+  if (score >= 50) return "#e0592a";
+  return "#b32c1a";
 }
 
 export function ScoreRing({ score, size = 84 }: { score: number; size?: number }) {
@@ -16,7 +16,7 @@ export function ScoreRing({ score, size = 84 }: { score: number; size?: number }
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} stroke="#232636" strokeWidth={stroke} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="#4a2f2c" strokeWidth={stroke} fill="none" />
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -45,7 +45,7 @@ export function RubricChips({ subscores }: { subscores: SubScores }) {
         const max = RUBRIC_WEIGHTS[k];
         const v = subscores[k];
         const pct = v / max;
-        const color = pct >= 0.75 ? "#3fcf8e" : pct >= 0.4 ? "#f0b429" : "#f0606b";
+        const color = pct >= 0.75 ? "#fffb97" : pct >= 0.4 ? "#e0592a" : "#b32c1a";
         return (
           <span
             key={k}

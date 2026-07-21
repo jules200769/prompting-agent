@@ -14,14 +14,14 @@ import {
   type SessionContext,
 } from "./session";
 
-const IMPORT_SUMMARY = `1. GOAL — Ship session-based context management for Anvyl.ai.
+const IMPORT_SUMMARY = `1. GOAL — Ship session-based context management for Anvyll.
 2. CURRENT STATE — storage layer done, overlay wiring in progress.
 3. KEY FACTS & DECISIONS — main process owns the store.
 4. CONSTRAINTS & PREFERENCES — no native deps.
 5. TERMINOLOGY & NAMES — storage.ts, Overlay.tsx.
 6. OPEN ITEMS — not established`;
 
-const PROJECT_IMPORT = `1. PROJECT — PromptForge Electron overlay for Windows.
+const PROJECT_IMPORT = `1. PROJECT — Anvyll Electron overlay for Windows.
 2. STACK & ARCHITECTURE — Electron, Vite, React, TypeScript.
 3. CONVENTIONS — English UI only.
 4. KEY FACTS & DECISIONS — main owns the store.
@@ -82,15 +82,15 @@ describe("deriveSessionTitleFromPrompt", () => {
 describe("deriveProjectTitle", () => {
   it("uses the PROJECT line from an import summary, stripped and ellipsized", () => {
     const title = deriveProjectTitle(PROJECT_IMPORT, Date.now());
-    expect(title.startsWith("PromptForge Electron overlay")).toBe(true);
+    expect(title.startsWith("Anvyll Electron overlay")).toBe(true);
     expect(title.length).toBeLessThanOrEqual(48);
     expect(title).not.toMatch(/^PROJECT\b/i);
   });
 
   it("picks up PROJECT text on the following line under a bare label", () => {
     expect(
-      deriveProjectTitle("1. PROJECT\nAnvyl rewrite studio\n2. STACK — n/a", Date.now()),
-    ).toBe("Anvyl rewrite studio");
+      deriveProjectTitle("1. PROJECT\nAnvyll rewrite studio\n2. STACK — n/a", Date.now()),
+    ).toBe("Anvyll rewrite studio");
   });
 
   it("falls back to the first non-empty line without a PROJECT label", () => {

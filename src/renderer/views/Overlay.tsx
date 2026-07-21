@@ -23,6 +23,7 @@ import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
 import { ModelPicker } from "../components/ModelPicker";
 import { WritingTypePicker, type WritingType, writingLevelLabels } from "../components/WritingTypePicker";
 import { ContextPanel } from "../components/ContextPanel";
+import { applyThemeToDocument } from "../../shared/themes";
 
 type Phase = "idle" | "capturing" | "optimizing" | "done" | "error";
 type CaptureGlow = "off" | "active";
@@ -271,11 +272,13 @@ function GlassPill({
   children,
   onClick,
   disabled,
+  accent,
   className = "",
 }: {
   children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
+  accent?: boolean;
   className?: string;
 }) {
   return (
@@ -283,7 +286,7 @@ function GlassPill({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`apple-glass-pill px-5 py-1.5 rounded-full text-[15px] font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
+      className={`${accent ? "apple-glass-pill--accent" : "apple-glass-pill"} px-5 py-1.5 rounded-full text-[15px] font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
     >
       {children}
     </button>
@@ -363,7 +366,7 @@ export function Overlay() {
   const [hasGenerated, setHasGenerated] = useState(false);
   /** Context layers that grounded the last completed refine — drives the chip row. */
   const [lastGrounding, setLastGrounding] = useState<OptimizeGrounding | null>(null);
-  /** ANVYL summary detected on the clipboard at capture — drives the consent toast. */
+  /** Anvyll summary detected on the clipboard at capture — drives the consent toast. */
   const [clipboardSummary, setClipboardSummary] = useState<{
     scope: ContextImportScope;
     text: string;
@@ -548,7 +551,11 @@ export function Overlay() {
       setModel(s.defaultModel);
       setLevel(s.defaultLevel);
       setOverlayPlacement(s.overlayPlacement);
+      applyThemeToDocument(s.theme, { overlay: true });
     })();
+    const offTheme = api.onSettingsChanged((theme) => {
+      applyThemeToDocument(theme, { overlay: true });
+    });
     // Restore the persisted active session + project context (survives app restarts).
     refreshContextSnapshot();
 
@@ -564,7 +571,7 @@ export function Overlay() {
       // capture is still running. The following delivery replaces it with the
       // actual capture, without changing any capture orchestration or timing.
       const isWaitingForCapture =
-        !window.__promptforgeMock &&
+        !window.__anvyllMock &&
         captureRef.current === null &&
         detail.text === "" &&
         detail.mode === "field" &&
@@ -634,6 +641,7 @@ export function Overlay() {
     const offShow = api.onOverlayShow(applyCapture);
     const offClear = api.onOverlayClear(resetOverlaySession);
     return () => {
+      offTheme?.();
       offPending?.();
       offShow?.();
       offClear?.();
@@ -1038,14 +1046,15 @@ export function Overlay() {
       <div className="sr-only" aria-live="polite">
         {phaseAnnouncement}
       </div>
-      <div ref={shellRef} className={`relative w-full max-w-[578px] ${shellVisible ? "" : "invisible"}`}>
+      <div ref={shellRef} className={`overlay-shell relative w-full max-w-[578px] ${shellVisible ? "" : "invisible"}`}>
+        <div className="overlay-ambient" aria-hidden />
         {/* Folder tabs — tucked behind the card (z-0 under the card's z-10) for depth. */}
         <div
           className="apple-glass-tab apple-glass-tab--left -left-[26px] top-1/2 -translate-y-1/2 w-[36px] h-[158px] flex items-center justify-start pl-[7px]"
           aria-hidden
         >
-          <span className="overlay-wordmark text-[10px] uppercase font-medium text-white/55 select-none">
-            PromptForge
+          <span className="overlay-wordmark text-[10px] font-bold select-none">
+            ANVYLL.AI
           </span>
         </div>
 
@@ -1072,7 +1081,7 @@ export function Overlay() {
           <div aria-hidden className="apple-glass-capture-aura" />
         )}
         <div
-          className={`apple-glass relative z-10 rounded-[34px] w-full p-4 text-white${
+          className={`apple-glass overlay-chrome relative z-10 rounded-[34px] w-full p-4${
             captureGlowOn ? " apple-glass--capture-wait" : ""
           }`}
         >
@@ -1096,7 +1105,7 @@ export function Overlay() {
                     readOnly={busy || capturing}
                     aria-label="Original prompt"
                     placeholder={capturing ? "Capturing…" : "Prompt input…"}
-                    className="w-full h-full bg-transparent border-0 px-3.5 py-3 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none scroll-thin"
+                    className="w-full h-full bg-transparent border-0 px-3.5 py-3 text-[15px] leading-relaxed text-[var(--overlay-ink)] placeholder:text-[var(--overlay-muted)] resize-none focus:outline-none scroll-thin"
                   />
                 </div>
                 <div className="pl-1 mt-1 flex items-center gap-3">
@@ -1132,7 +1141,7 @@ export function Overlay() {
                   readOnly={busy || capturing || phase === "error"}
                   aria-label="Refined prompt output"
                   placeholder={outputPlaceholder}
-                  className="w-full h-full bg-transparent border-0 px-3.5 py-3 pr-2 text-[15px] leading-relaxed text-white placeholder:text-white/50 resize-none focus:outline-none scroll-thin"
+                  className="w-full h-full bg-transparent border-0 px-3.5 py-3 pr-2 text-[15px] leading-relaxed text-[var(--overlay-ink)] placeholder:text-[var(--overlay-muted)] resize-none focus:outline-none scroll-thin"
                 />
                 {busy && displayed.length > 0 && (
                   <span
@@ -1155,7 +1164,7 @@ export function Overlay() {
                 <ModeSegmentPill value={segmentMode} onChange={setSegmentMode} disabled={controlsDisabled} />
                 <span className="sr-only">{modelLabel}</span>
                 {applyNotice && (
-                  <span className="text-[13px] text-warn truncate" role="status">
+                  <span className="text-[13px] text-white/45 truncate max-w-[220px]" role="status">
                     {applyNotice}
                   </span>
                 )}
@@ -1178,7 +1187,7 @@ export function Overlay() {
                 >
                   Discard
                 </button>
-                <GlassPill onClick={onApply} disabled={!canApply}>
+                <GlassPill accent onClick={onApply} disabled={!canApply}>
                   Apply
                 </GlassPill>
                 <div ref={copyAnchorRef} className="relative shrink-0">

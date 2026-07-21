@@ -2,9 +2,9 @@
 ## Full prompt (copy-paste content)
 
 ```markdown
-# PromptForge — UX bug hunt, flaw repair, and optimization
+# Anvyll — UX bug hunt, flaw repair, and optimization
 
-You are auditing and fixing **PromptForge** (`c:\Users\julez\Apps\prompt-master`): a Windows-only Electron + Vite + React/TypeScript app that captures text from the active Windows field/terminal via Ctrl+Shift+O, refines prompts through an overlay, and injects results back with Apply.
+You are auditing and fixing **Anvyll** (`c:\Users\julez\Apps\prompt-master`): a Windows-only Electron + Vite + React/TypeScript app that captures text from the active Windows field/terminal via Ctrl+Shift+O, refines prompts through an overlay, and injects results back with Apply.
 
 ## Goal
 
@@ -74,7 +74,7 @@ flowchart LR
 | Rewrite pipeline | [`src/engine/orchestrator.ts`](src/engine/orchestrator.ts), [`src/engine/providers.ts`](src/engine/providers.ts), [`src/engine/guideLoader.ts`](src/engine/guideLoader.ts) |
 | PS scripts | [`scripts/win-hotkey-snapshot.ps1`](scripts/win-hotkey-snapshot.ps1), [`scripts/win-inject.ps1`](scripts/win-inject.ps1), [`scripts/terminal-io.ps1`](scripts/terminal-io.ps1), [`scripts/inject-strategy.ps1`](scripts/inject-strategy.ps1) |
 | Tests | `src/**/*.test.ts` (13 files) |
-| Terminal skill reference | [`.cursor/skills` or user skill `promptforge-terminal-capture`] |
+| Terminal skill reference | [`.cursor/skills` or user skill `anvyll-terminal-capture`] |
 
 PS script edits apply on next hotkey without rebuild. TypeScript changes need `npm test` and dev reload.
 

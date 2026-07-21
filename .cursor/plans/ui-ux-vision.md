@@ -1,4 +1,4 @@
-# PromptForge — UI/UX Vision (Perfect State)
+# Anvyll — UI/UX Vision (Perfect State)
 
 > Authored by Claude Fable 5 · 2026-07-06 · Based on study of prompt-master repo
 > (AGENTS.md UX contract, CONCEPT.md §7, `.cursor/plans/product-vision.md`,
@@ -9,7 +9,7 @@
 
 ## Executive summary
 
-PromptForge's UX is two instruments sharing one engine: a glass **overlay** that
+Anvyll's UX is two instruments sharing one engine: a glass **overlay** that
 must feel like a Windows reflex — hotkey, refined prompt, Apply, gone in
 seconds, keyboard all the way — and a dense **Studio** workbench where scores,
 diffs, library, and settings explain what the overlay deliberately hides. The
@@ -341,9 +341,9 @@ Specifics the current build should grow into:
 - **Settings:** the as-built form (hotkey, default model/level, persona,
   context memory, telemetry, key management with secure-storage warning) is the
   right scope. Required fixes: (1) the key-section copy still says "Without a
-  key, PromptForge uses the local fallback optimizer" — **false and
+  key, Anvyll uses the local fallback optimizer" — **false and
   trust-corrosive**; replace with "Without a key, optimization is unavailable —
-  PromptForge never substitutes generic output." (2) Hotkey entry becomes a
+  Anvyll never substitutes generic output." (2) Hotkey entry becomes a
   recorder (press the combo, it fills; free-text stays as fallback) with a
   conflict check. (3) Key save confirms via toast + masked "•••• stored ••••"
   state (exists) — never echo the key.
@@ -353,10 +353,10 @@ Specifics the current build should grow into:
 - **Tray:** the only always-on presence — needs a real monochrome glyph (empty
   image today). Menu: `Refine clipboard` (runs the pipeline on clipboard text —
   cheap, high-utility), `Open Studio`, `Settings`, `Quit`. Tooltip
-  "PromptForge — Ctrl+Shift+O".
+  "Anvyll — Ctrl+Shift+O".
 - **Onboarding (first run only):** three glass cards in the overlay's own
   shell — (1) "Press Ctrl+Shift+O in any text field" with the hotkey rendered
-  as keycaps; (2) "Pick the model you're sending to — PromptForge rewrites to
+  as keycaps; (2) "Pick the model you're sending to — Anvyll rewrites to
   *its* published methodology" with the six model marks; (3) guided try-it-now:
   a sample rough prompt pre-filled, user presses Enter, watches the stream,
   presses Apply into a demo field. API-key entry is step 0 if absent, with a

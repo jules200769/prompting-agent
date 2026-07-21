@@ -32,7 +32,7 @@ Schrijf je antwoorden in helder, vloeiend Nederlands, gebruik volledige zinnen e
 Ik bekijk eerst hoe de prompt-engineering in jullie app is opgebouwd, zodat we gericht kunnen testen en verbeteren.
 
 
-Ik begrijp de aanpak. We gaan samen PromptForge testen: jij voert een ruwe prompt in de overlay in, laat die verfijnen, en deelt hier de input, het doelmodel, het niveau (L1–L4) en de output. Op basis daarvan analyseren we wat goed werkt en wat niet, en sturen we de prompt-engineering stap voor stap bij.
+Ik begrijp de aanpak. We gaan samen Anvyll testen: jij voert een ruwe prompt in de overlay in, laat die verfijnen, en deelt hier de input, het doelmodel, het niveau (L1–L4) en de output. Op basis daarvan analyseren we wat goed werkt en wat niet, en sturen we de prompt-engineering stap voor stap bij.
 
 De app gebruikt GPT-4.1 mini als rewrite-model, maar de stijl en structuur komen uit de gekozen prompting guide (Claude Opus, GPT-5.5, Gemini, DeepSeek, Grok of Composer). Het niveau bepaalt hoe diep die guide wordt toegepast: L1 is minimaal (alleen typos en ambiguïteit), L2 lichte herstructurering, L3 volledige guide-structuur, L4 inclusief voorbeelden en verificatiecriteria. De meta-prompt in `buildMetaPrompt` en de level-instructies in `guideLoader.ts` zijn de plekken waar we later gericht kunnen ingrijpen.
 
@@ -63,7 +63,7 @@ Claude heeft de meest herkenbare, meetbare guide-patronen — vooral XML-structu
 my react app lags when users type in the search box. the list has around 500 items. probably a rerender issue? fix it but dont change the ui or break filtering. typescript.
 ```
 
-Die prompt test precies wat PromptForge moet doen: vage formulering (“probably”, “fix it”) omzetten in een heldere opdracht, ontbrekende structuur aanvullen (context, taak, constraints, gewenst outputformaat), en tegelijk jouw feiten behouden — React, TypeScript, ~500 items, search box, geen UI-wijziging, filtering intact.
+Die prompt test precies wat Anvyll moet doen: vage formulering (“probably”, “fix it”) omzetten in een heldere opdracht, ontbrekende structuur aanvullen (context, taak, constraints, gewenst outputformaat), en tegelijk jouw feiten behouden — React, TypeScript, ~500 items, search box, geen UI-wijziging, filtering intact.
 
 Vermijd voor de eerste ronde prompts die te kort zijn (“make my landing page better”) of te lang met veel domeinkennis; die maken het lastig om te zien of de guide of de input het probleem is.
 
@@ -106,7 +106,7 @@ De **gouden regel** van Anthropic: laat je prompt aan een collega zonder context
 
 ---
 
-## Beoordelingskader voor PromptForge (jouw testinput)
+## Beoordelingskader voor Anvyll (jouw testinput)
 
 Jouw input is een typische **coding/debug-prompt** met impliciete scope:
 
@@ -864,7 +864,7 @@ De `npm run dev`-sessie is gestopt. Voor je Max-test opnieuw starten in de proje
 npm run dev
 ```
 
-Wacht tot je `[PromptForge] Dev bridge http://127.0.0.1:5174` in de terminal ziet, daarna kun je de overlay of browser-preview gebruiken.
+Wacht tot je `[Anvyll] Dev bridge http://127.0.0.1:5174` in de terminal ziet, daarna kun je de overlay of browser-preview gebruiken.
 
 ---
 
@@ -883,7 +883,7 @@ De fout kwam doordat **poort 5173 al in gebruik was** door een oude Vite-process
 
 Die heb ik beëindigd en `npm run dev` opnieuw gestart. Vite draait weer op `http://localhost:5173/` en Electron is opgestart.
 
-**Let op:** de hotkey `Ctrl+Shift+O` kon niet geregistreerd worden — waarschijnlijk omdat er nog een oud Electron-exemplaar actief is. Sluit eventuele PromptForge-vensters in de taakbalk, of beëindig het oude proces (PID **20968** op poort 5174) via Taakbeheer als de hotkey blijft falen.
+**Let op:** de hotkey `Ctrl+Shift+O` kon niet geregistreerd worden — waarschijnlijk omdat er nog een oud Electron-exemplaar actief is. Sluit eventuele Anvyll-vensters in de taakbalk, of beëindig het oude proces (PID **20968** op poort 5174) via Taakbeheer als de hotkey blijft falen.
 
 Je kunt nu je Max-test doen met de e-mailprompt.
 
@@ -967,7 +967,7 @@ Nee — niet **100%** tevreden, wel **grotendeels klaar** met wat we konden doen
 
 ## Wat de missie was
 
-PromptForge testen, Opus 4.8-output beoordelen tegen echte prompting guidance, en de rewrite-pipeline stap voor stap verbeteren. Dat hebben we gedaan: onderzoek, twee testrondes, analyse, code-fixes, en gedeeltelijke browser-validatie.
+Anvyll testen, Opus 4.8-output beoordelen tegen echte prompting guidance, en de rewrite-pipeline stap voor stap verbeteren. Dat hebben we gedaan: onderzoek, twee testrondes, analyse, code-fixes, en gedeeltelijke browser-validatie.
 
 ## Waar we tevreden mee kunnen zijn
 

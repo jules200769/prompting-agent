@@ -27,7 +27,7 @@ export const PROJECT_SUMMARY_LABELS = [
   "TERMINOLOGY & NAMES",
 ] as const;
 
-export const CONTEXT_IMPORT_PROMPT = `You are helping me export the context of this chat session so another tool (ANVYL.ai, a prompt-refinement assistant) can use it as background knowledge when improving my future prompts for this same session.
+export const CONTEXT_IMPORT_PROMPT = `You are helping me export the context of this chat session so another tool (Anvyll at anvyll.app, a prompt-refinement assistant) can use it as background knowledge when improving my future prompts for this same session.
 
 Summarize the working context of this conversation. Follow these rules exactly.
 
@@ -53,7 +53,7 @@ FORMAT
 // Same export flow as CONTEXT_IMPORT_PROMPT, but for standing project knowledge
 // that should survive across sessions (stack, conventions, architecture).
 
-export const PROJECT_CONTEXT_IMPORT_PROMPT = `You are helping me export the context of this project so another tool (ANVYL.ai, a prompt-refinement assistant) can use it as background knowledge when improving my future prompts for this same project.
+export const PROJECT_CONTEXT_IMPORT_PROMPT = `You are helping me export the context of this project so another tool (Anvyll at anvyll.app, a prompt-refinement assistant) can use it as background knowledge when improving my future prompts for this same project.
 
 Summarize the lasting project context from this conversation and any project materials discussed. Follow these rules exactly.
 

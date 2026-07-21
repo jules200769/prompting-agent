@@ -1,4 +1,4 @@
-# PromptForge — Product Vision (Perfect State)
+# Anvyll — Product Vision (Perfect State)
 
 > Authored by Claude Fable 5 · 2026-07-06 · Based on study of prompt-master repo
 > (CONCEPT.md, README.md, AGENTS.md, claudes-goal.md, prompt-guide-calibration.md,
@@ -8,13 +8,13 @@
 
 ## Executive summary
 
-PromptForge is the fastest path from a rough prompt to a model-correct prompt on Windows: press Ctrl+Shift+O in any text field or terminal, get a rewrite shaped to the official prompting methodology of the model you're about to use, and Apply it back in place. Its two defensible bets — **model-specific engines as versioned data** and a **Windows-native capture/inject overlay** — are both built and working; no surviving competitor combines them. The perfect product is not more features: it is the current gold path made *provably* reliable (capture success, inject correctness, clipboard safety) and the rewrite quality made *provably* better than generic optimization (an eval harness gating every guide/contract change). Today the product is roughly an M2.5: the engine is calibrated across all six targets, the overlay UX is contract-hardened, but there is no eval automation, no onboarding, no packaged installer, and two known capture/inject trust gaps. This document defines the end state and maps the gap.
+Anvyll is the fastest path from a rough prompt to a model-correct prompt on Windows: press Ctrl+Shift+O in any text field or terminal, get a rewrite shaped to the official prompting methodology of the model you're about to use, and Apply it back in place. Its two defensible bets — **model-specific engines as versioned data** and a **Windows-native capture/inject overlay** — are both built and working; no surviving competitor combines them. The perfect product is not more features: it is the current gold path made *provably* reliable (capture success, inject correctness, clipboard safety) and the rewrite quality made *provably* better than generic optimization (an eval harness gating every guide/contract change). Today the product is roughly an M2.5: the engine is calibrated across all six targets, the overlay UX is contract-hardened, but there is no eval automation, no onboarding, no packaged installer, and two known capture/inject trust gaps. This document defines the end state and maps the gap.
 
 ## North star
 
 **One-liner:** Every prompt a Windows user sends to any AI arrives pre-shaped to that model's own published methodology — in under three seconds, without leaving the field they were typing in.
 
-PromptForge exists because prompting techniques are not portable: Anthropic, OpenAI, Google, DeepSeek, xAI, and Cursor each publish distinct, moving guidance, and no working professional keeps up with six evolving playbooks. PromptForge internalizes that maintenance burden as versioned guide files and level contracts, and delivers it through the lowest-friction surface possible: a system-wide hotkey overlay that captures where you are and puts the result back where you were. It wins when the user stops thinking about prompt engineering entirely — the hotkey *is* their prompt engineering.
+Anvyll exists because prompting techniques are not portable: Anthropic, OpenAI, Google, DeepSeek, xAI, and Cursor each publish distinct, moving guidance, and no working professional keeps up with six evolving playbooks. Anvyll internalizes that maintenance burden as versioned guide files and level contracts, and delivers it through the lowest-friction surface possible: a system-wide hotkey overlay that captures where you are and puts the result back where you were. It wins when the user stops thinking about prompt engineering entirely — the hotkey *is* their prompt engineering.
 
 ## Who this is for
 
@@ -22,7 +22,7 @@ PromptForge exists because prompting techniques are not portable: Anthropic, Ope
 - **Secondary — prompt-curious professionals.** Marketers, founders, analysts, writers using AI for revenue work in Word, Notion, browsers. They benefit from the same flow with zero learning curve: hotkey, Generate, Apply.
 - **Later — teams.** Shared libraries, personas, consistent quality. Explicitly post-perfect (needs accounts/sync).
 
-**Non-goals (unchanged from CONCEPT.md and still correct):** PromptForge never answers the prompt — it only shapes it. The Studio is a workbench, not a chat UI. The engine will never collapse into one model-agnostic template; that would surrender the core thesis. And it is Windows-first: the open lane is Windows, the competition is macOS/extension-first.
+**Non-goals (unchanged from CONCEPT.md and still correct):** Anvyll never answers the prompt — it only shapes it. The Studio is a workbench, not a chat UI. The engine will never collapse into one model-agnostic template; that would surrender the core thesis. And it is Windows-first: the open lane is Windows, the competition is macOS/extension-first.
 
 ## The perfect user experience
 
@@ -60,7 +60,7 @@ Perfect capture is a matrix, and every cell has a defined behavior — no host i
 | Rich editors (Notion, contentEditable) | UIA snapshot | Same as Chromium |
 | Windows Terminal / conhost | UIA `TextPattern.GetSelection()` → clipboard fallback (Ctrl+Shift+C / Ctrl+C), clipboard restored | Single focus+select+paste (right-click paste WT/conhost), frozen `terminalBounds` when UIA resolve fails |
 | Cursor/VS Code integrated terminals | Pane detection (`focusedIsTerminalPane`), a11y-noise filtering | Ctrl+V paste, same unified Apply path |
-| PromptForge Studio itself | Same as any field | Same as any field |
+| Anvyll Studio itself | Same as any field | Same as any field |
 | Secure/blocked fields | Compose mode (empty capture, user types) | Copy with toast — never a silent failure |
 
 Non-negotiable mechanics behind the matrix (all as-built, all load-bearing): the frozen inject target from capture time — Apply must *never* resolve "whatever is focused now" (today's `win-inject.ps1` focused-element fallback without a window-ownership check is a known wrong-window risk and the top capture/inject fix); blur-hide skipped while `hotkeyInFlight`; `terminal-io.ps1` sole owner of the shared `WinFg` type; PS scripts read fresh per hotkey so capture fixes ship without rebuilds; clipboard snapshot/restore semantics exactly as stated in the overlay section; terminal rewrites always single-line (`toTerminalSingleLine`, Enter blocked in the output textarea) because a pasted newline executes in a shell.
@@ -106,10 +106,10 @@ What "perfect" output looks like per target (distilled from the calibration plan
 
 ## Differentiation & moat
 
-- **Model-specific vs. everyone.** PromptAI is explicitly model-agnostic; PromptItIn runs one shared framework. PromptForge maintains six calibrated methodology engines with per-level structure contracts and (in perfect state) eval-gated updates. The artifact that proves it — six models × four visibly distinct levels on shared benchmarks — is something no competitor can screenshot.
+- **Model-specific vs. everyone.** PromptAI is explicitly model-agnostic; PromptItIn runs one shared framework. Anvyll maintains six calibrated methodology engines with per-level structure contracts and (in perfect state) eval-gated updates. The artifact that proves it — six models × four visibly distinct levels on shared benchmarks — is something no competitor can screenshot.
 - **Windows-native inject vs. macOS/extension-first.** The competitive field clusters on macOS and Chrome extensions. System-wide capture *and inject* across native, Chromium, rich editors, and four terminal flavors on Windows is brutally hard (the `scripts/` + AGENTS.md scar tissue is the evidence) and correspondingly hard to fast-follow.
 - **Speed as a feature.** Instant glass, capture-after-shell, resident window, warmed PS bridge: the overlay competes with the user's own reflexes, not with a web dashboard round-trip.
-- **Compounding data moat (earned, not automatic):** guide files + contracts + eval benchmarks form an updatable quality pipeline — when a provider revises its guidance, PromptForge ships the update as a data change in days, eval-verified. Switching costs (library, personas, history) accrue on top. Timing tailwind: PromptPerfect's Sept 2026 shutdown leaves a migrating user base (per CONCEPT.md's market research).
+- **Compounding data moat (earned, not automatic):** guide files + contracts + eval benchmarks form an updatable quality pipeline — when a provider revises its guidance, Anvyll ships the update as a data change in days, eval-verified. Switching costs (library, personas, history) accrue on top. Timing tailwind: PromptPerfect's Sept 2026 shutdown leaves a migrating user base (per CONCEPT.md's market research).
 
 ## Gap map: today → perfect
 
@@ -130,7 +130,7 @@ What "perfect" output looks like per target (distilled from the calibration plan
 
 ## Roadmap shape (not a task list)
 
-- **Now — make the promise safe (P0).** Close the wrong-window inject risk; build the eval harness v1 (contract-compliance battery over the existing two-prompt × six-model × four-level matrix, runnable headless via the dev bridge); produce a signed installer with auto-update and verify cold-boot hotkey latency. Exit test: a stranger installs PromptForge, and nothing they can do loses text or injects into the wrong app.
+- **Now — make the promise safe (P0).** Close the wrong-window inject risk; build the eval harness v1 (contract-compliance battery over the existing two-prompt × six-model × four-level matrix, runnable headless via the dev bridge); produce a signed installer with auto-update and verify cold-boot hotkey latency. Exit test: a stranger installs Anvyll, and nothing they can do loses text or injects into the wrong app.
 - **Next — make it land (P1).** Onboarding + guided key setup; overlay keyboard focus resolved; opt-in telemetry wired to the success criteria; host-matrix capture/inject verification runs as a manual release checklist. Exit test: activation (install → first successful Apply) is a minutes-long, unassisted path, and we can see the funnel.
 - **Later — make it compound (P2→P3).** Studio explain layer and library polish; guide freshness workflow with dated versions; persona/context UX; model-id and doc hygiene (update CONCEPT §7 / README to match reality); then re-evaluate rewrite-model routing with eval data. Cloud tier, teams, AI Research Mode, macOS remain post-perfect and gated on the local product's retention numbers.
 

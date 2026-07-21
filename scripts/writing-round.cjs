@@ -120,7 +120,7 @@ async function runViaBridge(body) {
     const req = http.request(
       {
         hostname: "127.0.0.1",
-        port: Number(process.env.PROMPTFORGE_DEV_BRIDGE_PORT ?? 5174),
+        port: Number(process.env.ANVYLL_DEV_BRIDGE_PORT ?? 5174),
         path: "/api/optimize",
         method: "POST",
         headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(json) },

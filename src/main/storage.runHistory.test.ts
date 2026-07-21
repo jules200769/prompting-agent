@@ -7,7 +7,7 @@ import type { OptimizeRequest, OptimizeResult } from "../shared/types";
 const tmpDir = mkdtempSync(join(tmpdir(), "pf-run-history-test-"));
 vi.mock("electron", () => ({ app: { getPath: () => tmpDir } }));
 
-const storeFile = () => join(tmpDir, "promptforge.store.json");
+const storeFile = () => join(tmpDir, "anvyll.store.json");
 const jsonlPath = () => join(tmpDir, "run-history.jsonl");
 
 let store: typeof import("./storage");

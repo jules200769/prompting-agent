@@ -125,7 +125,7 @@ export function Onboarding() {
           <div className="flex flex-col gap-4">
             <h1 className="text-[19px] font-semibold">Connect your OpenAI key</h1>
             <p className="text-[14px] leading-relaxed text-white/70">
-              PromptForge uses one OpenAI model to rewrite prompts. Your key is
+              Anvyll uses one OpenAI model to rewrite prompts. Your key is
               encrypted with the Windows Credential Manager and never leaves this
               machine — only prompt text goes to the API.
             </p>
@@ -176,7 +176,7 @@ export function Onboarding() {
             <h1 className="text-[19px] font-semibold">Rewritten for the model you send it to</h1>
             <p className="text-[14px] leading-relaxed text-white/70">
               Every AI has its own published prompting methodology. Pick your target
-              and PromptForge restructures your prompt to that model&apos;s own guide —
+              and Anvyll restructures your prompt to that model&apos;s own guide —
               from a light clean-up (Cool) to full structure (Max).
             </p>
             <div className="flex flex-wrap gap-1.5">

@@ -337,8 +337,7 @@ function Resolve-TargetElement($meta, [IntPtr]$top) {
     $el = Resolve-ElementAtBounds $meta.bounds
   }
   if ($null -ne $el) {
-    Click-Bounds $meta.bounds
-    Invoke-ElementFocus $el
+    # Resolve only — the single focus/click happens later in Try-ClipboardPaste.
     return $el
   }
   if ($null -ne $meta -and $meta.bounds) {
@@ -352,11 +351,16 @@ function Resolve-TargetElement($meta, [IntPtr]$top) {
 }
 
 function Invoke-ClipboardReplace([IntPtr]$top, [string]$value, [int]$settleMs) {
-  Set-Clipboard -Value $value
-  Start-Sleep -Milliseconds 80
+  # Skip the write (and its settle) when the clipboard already holds the refined text.
+  $current = $null
+  try { $current = Get-Clipboard -Raw -ErrorAction Stop } catch {}
+  if ($current -ne $value) {
+    Set-Clipboard -Value $value
+    Start-Sleep -Milliseconds 60
+  }
   [WinInject]::WithTargetInput($top, {
     [WinInject]::SendCtrlCombo(0x41)
-    Start-Sleep -Milliseconds 80
+    Start-Sleep -Milliseconds 30
     [WinInject]::SendCtrlCombo(0x56)
   })
   Start-Sleep -Milliseconds $settleMs
@@ -583,7 +587,11 @@ if ($meta -and $meta.hostKind) {
 
 if ($hostKind -ne "terminal") {
   [WinInject]::FocusWindow($top)
-  Start-Sleep -Milliseconds 200
+  # Poll for foreground rather than a flat wait; exits as soon as the target is focused.
+  $fgDeadline = [Environment]::TickCount + 300
+  while ([Environment]::TickCount -lt $fgDeadline -and [WinInject]::GetForegroundWindow() -ne $top) {
+    Start-Sleep -Milliseconds 15
+  }
 
   if ($script:IsChromiumHost) {
     [WinInject]::ActivateChromiumAccessibility($top)

@@ -1,5 +1,5 @@
-Implementation Plan — Session/Context UX Redesign (PromptForge / ANVYL.ai)
-All paths absolute under C:\Users\julez\Apps\Anvyl.ai\prompt-master. Line numbers refer to current file state.
+Implementation Plan — Session/Context UX Redesign (Anvyll / Anvyll)
+All paths absolute under C:\Users\julez\Apps\Anvyll\prompt-master. Line numbers refer to current file state.
 
 Shared groundwork (do first, tiny, enables Waves 1–2)
 G1. One context snapshot refresher in Overlay.tsx
@@ -29,7 +29,7 @@ project name text-white/45 truncate — project?.title ?? "No project"
 separator / in text-white/30
 session title text-white font-medium truncate — session?.title ?? "New session" (when activeSession is null show "No session"; see edge cases)
 chevron ▾ pushed right (ml-auto text-white/40 text-[11px]), rotated when open.
-a11y: aria-haspopup="menu", aria-expanded={open}, aria-label like "Context: Anvyl.ai / Fix overlay session UX".
+a11y: aria-haspopup="menu", aria-expanded={open}, aria-label like "Context: Anvyll / Fix overlay session UX".
 Insert as the first child inside .apple-glass card (line 941), above the flex gap-4 mb-4 row at 943. The card grows ~30px; that is expected per the design doc ("one line tall; silhouette otherwise untouched"). No animation on appearance — it's always rendered (AGENTS rule: shell shows instantly, no flicker).
 disabled while capturing (placeholder state) so it can't open a stale panel mid-capture.
 Click target in Wave NOW (decision — doc is ambiguous because the panel ships in Wave NEXT): onClick={() => setMenuOpen(v => !v)} as an interim wiring — the bar opens the existing ⋮ dropdown, which already contains session switching + "Context". Wave NEXT rewires it to setContextPanelOpen(true). This keeps Wave NOW shippable and useful on its own.
@@ -70,7 +70,7 @@ Complete string inventory (grep-verified; all in src/renderer/views/Overlay.tsx,
 
 Line	Current	New
 902	Configure context	Context
-1209	Import context to ANVYL.ai	Bring context from your chat
+1209	Import context to Anvyll	Bring context from your chat
 1234	Copy this prompt into a chat with your other AI provider	Copy this prompt into your AI chat — your refinements will understand that conversation. (payoff-first, per doc 4.3)
 1112	Start with project context?	unchanged in NOW (interstitial dies in Wave NEXT)
 262-273	contextStatusPlaceholder both-off case: "Session: off · Project: off"	when both off return one payoff sentence, e.g. "No context yet — add a session or project so refinements understand your work."; keep the current concise Session: on — {title} · Project: on/off formats when anything is on (decision)
@@ -138,10 +138,10 @@ Panel "+ Project"	project	locked	new project (newProjectFlow, existing)
 (Wave LATER toast confirm)	detected scope	locked	active session / active project
 Implementation:
 
-Keep contextImportScope + newProjectFlow; add importTargetProjectId: string | null (for the header entry). Every open path sets scope explicitly; the modal footer always passes lockedScope={contextImportScope} to ContextScopePill (1281-1287) — the pill's existing lockedScope mechanics (206-260) already filter to one non-interactive option, so it becomes the label with zero new components. Restyle the locked rendering slightly (drop hover affordance, add the target name: Session — Fix overlay session UX / Project — Anvyl.ai) via a small addition to ContextScopePill (lockedLabelDetail?: string). onContextImportScopeChange (703-707) becomes dead — delete.
+Keep contextImportScope + newProjectFlow; add importTargetProjectId: string | null (for the header entry). Every open path sets scope explicitly; the modal footer always passes lockedScope={contextImportScope} to ContextScopePill (1281-1287) — the pill's existing lockedScope mechanics (206-260) already filter to one non-interactive option, so it becomes the label with zero new components. Restyle the locked rendering slightly (drop hover affordance, add the target name: Session — Fix overlay session UX / Project — Anvyll) via a small addition to ContextScopePill (lockedLabelDetail?: string). onContextImportScopeChange (703-707) becomes dead — delete.
 Non-active project import needs one new IPC (decision — smallest honest addition): projectUpsertActive (619) only writes the active project. Add:
 src/main/storage.ts: setProjectContextByIdKeepTitle(id, text) — actually name it setProjectContextById(id: string, text: string): ProjectContext | null — clamp to PROJECT_CONTEXT_MAX_CHARS, re-derive title via deriveProjectTitle only if current title is the default (mirror upsertActiveProject internals), bump updatedAt.
-src/shared/types.ts IPC const PROJECT_SET_CONTEXT_BY_ID: "promptforge:project:set-context-by-id"; handler in main.ts next to 613-621; preload projectSetContextById(id, text) next to 112-116.
+src/shared/types.ts IPC const PROJECT_SET_CONTEXT_BY_ID: "anvyll:project:set-context-by-id"; handler in main.ts next to 613-621; preload projectSetContextById(id, text) next to 112-116.
 onAddToContext project branch: if importTargetProjectId set and ≠ active project → api.projectSetContextById(...) (does not touch active project — respects the resume rule's spirit); else existing projectUpsertActive path.
 Extend src/main/storage.session.test.ts: by-id write clamps, preserves activeProjectId, returns null for unknown id, cascade-unaffected.
 Prefill on open stays as today (892-897) for the active-session path; for the project-header path prefill importedProjectContext from p.contextText.
@@ -160,7 +160,7 @@ Tests — src/shared/contextSummaryDetect.test.ts: valid session summary → "se
 Where the check runs — main-side, in deliverCaptureToOverlay (src/main/main.ts:198-231) (decision):
 
 Just before overlay.webContents.send(IPC.OVERLAY_SHOW, ...) (217): const clip = clipboard.readText(); const scope = detectContextSummary(clip); and, when matched, add clipboardSummary: { scope, text: clip } to the payload (extend the OverlayShowPayload type used by preload).
-Why main-side: (a) the hotkey path already restores the pre-capture clipboard in capture.ts (195-201) before delivery, so at this point the clipboard holds what the user last copied — the external AI's answer; (b) no general "read clipboard" API is exposed to the renderer — only text that already matches ANVYL's own format ever crosses IPC, which is the strongest privacy posture; (c) deliverCaptureToOverlay ends in overlay.focus() (230) — this is the "on overlay focus" moment, including the second-OVERLAY_SHOW-while-open path (213).
+Why main-side: (a) the hotkey path already restores the pre-capture clipboard in capture.ts (195-201) before delivery, so at this point the clipboard holds what the user last copied — the external AI's answer; (b) no general "read clipboard" API is exposed to the renderer — only text that already matches Anvyll's own format ever crosses IPC, which is the strongest privacy posture; (c) deliverCaptureToOverlay ends in overlay.focus() (230) — this is the "on overlay focus" moment, including the second-OVERLAY_SHOW-while-open path (213).
 Privacy constraints honored: check runs only here (never polled, never on blur/timer); the text lives only in the payload + renderer state; no store write ever happens unless the user confirms; state cleared on confirm/dismiss/OVERLAY_CLEAR/next capture.
 Preload: no new invoke; onOverlayShow (146-152) passes the enlarged payload through untouched.
 Renderer — consent toast in Overlay.tsx:
@@ -189,8 +189,8 @@ PR5 (LATER): label exports + contextSummaryDetect + main-side check in deliverCa
 Each PR leaves the app shippable; PR3 is the only one that removes existing UI, and everything it removes is replaced within the same PR.
 
 Critical Files for Implementation
-C:\Users\julez\Apps\Anvyl.ai\prompt-master\src\renderer\views\Overlay.tsx
-C:\Users\julez\Apps\Anvyl.ai\prompt-master\src\main\optimizeHandler.ts
-C:\Users\julez\Apps\Anvyl.ai\prompt-master\src\shared\types.ts
-C:\Users\julez\Apps\Anvyl.ai\prompt-master\src\main\main.ts
-C:\Users\julez\Apps\Anvyl.ai\prompt-master\src\shared\contextImportPrompt.ts
+C:\Users\julez\Apps\Anvyll\prompt-master\src\renderer\views\Overlay.tsx
+C:\Users\julez\Apps\Anvyll\prompt-master\src\main\optimizeHandler.ts
+C:\Users\julez\Apps\Anvyll\prompt-master\src\shared\types.ts
+C:\Users\julez\Apps\Anvyll\prompt-master\src\main\main.ts
+C:\Users\julez\Apps\Anvyll\prompt-master\src\shared\contextImportPrompt.ts

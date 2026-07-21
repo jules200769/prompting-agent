@@ -1,8 +1,8 @@
-# Context Layer (v1) — PromptForge
+# Context Layer (v1) — Anvyll
 
 ## Context
 
-Wispr Flow's biggest quality lever is a "context layer": before the model call, it folds on-screen and app signal into the request so output reads as "already right" for its destination. PromptForge already captures rich target-app signal at hotkey time — process name, window class, host kind (native/chromium/richEditor/terminal), UIA element metadata — but **discards all of it before the LLM call**; only a `terminalContext` boolean reaches the rewrite. Meanwhile an end-to-end context channel already exists and is unused on the hotkey path: `OptimizeRequest.context` → `contextLine` in `buildMetaPrompt` (`src/engine/providers.ts:39-42,142`).
+Wispr Flow's biggest quality lever is a "context layer": before the model call, it folds on-screen and app signal into the request so output reads as "already right" for its destination. Anvyll already captures rich target-app signal at hotkey time — process name, window class, host kind (native/chromium/richEditor/terminal), UIA element metadata — but **discards all of it before the LLM call**; only a `terminalContext` boolean reaches the rewrite. Meanwhile an end-to-end context channel already exists and is unused on the hotkey path: `OptimizeRequest.context` → `contextLine` in `buildMetaPrompt` (`src/engine/providers.ts:39-42,142`).
 
 This plan threads a structured `CaptureContext` from the existing capture pass into the meta-prompt so rewrites adapt to their destination (Slack message vs Cursor chat vs claude.ai vs terminal), auto-routes the target model dialect, and adds the app's first privacy gating.
 
@@ -131,7 +131,7 @@ Automated: `npm test` (new: contextSignals, cacheKey, providers block tests), `n
 Manual via `npm run dev` (PS scripts hot-reload per hotkey; TS needs restart):
 1. **Slack**: hotkey on a draft → context logged; Generate/Apply work as before.
 2. **Chrome on claude.ai**: picker preselects Opus 4.8 with "auto" hint; manual pick of GPT-5 wins for the run; next hotkey re-suggests. Repeat chatgpt.com/gemini/grok. If UIA URL fails, title fallback still routes.
-3. **Cursor**: chat pane suggests composer-2.5; integrated terminal stays `mode:"terminal"`, single-line, no routing; editor grows `fileMemory` in `promptforge.store.json`; "update the storage ts file" pulls `storage.ts` into the block.
+3. **Cursor**: chat pane suggests composer-2.5; integrated terminal stays `mode:"terminal"`, single-line, no routing; editor grows `fileMemory` in `anvyll.store.json`; "update the storage ts file" pulls `storage.ts` into the block.
 4. **Selection**: select a middle sentence → scope "selection" with before/after; no selection → scope "field".
 5. **Password field**: hotkey opens empty overlay, nothing captured, no context, clipboard untouched, win-capture keyboard fallback never fires.
 6. **Toggle off**: behaves exactly as today — no context in request, no fileMemory writes, default model.

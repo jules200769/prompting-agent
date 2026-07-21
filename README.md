@@ -1,7 +1,9 @@
-# PromptForge — MVP
+# Anvyll — MVP
+
+**Product:** Anvyll · **Domain:** [anvyll.app](https://anvyll.app) (not purchased yet)
 
 A Windows-native AI prompt optimization studio. Write a rough prompt anywhere,
-press a global hotkey, and PromptForge rewrites it according to the **official
+press a global hotkey, and Anvyll rewrites it according to the **official
 prompt-engineering methodology of the specific target model** (Claude Opus 4.8,
 GPT-5, Gemini 3, DeepSeek V3, Grok 4), then applies the optimized prompt back
 into the original text box — or copies it to the clipboard.
@@ -88,7 +90,7 @@ npx electron-builder --win   # produce an installer in /release
 
 1. **Open Studio** (opens on launch, or from the tray). Go to **Settings**.
 2. (Optional) Add your **OpenAI API key** for LLM-quality rewrites via GPT-4.1 mini.
-   Without a key, PromptForge uses the local fallback optimizer.
+   Without a key, Anvyll uses the local fallback optimizer.
 3. Set your **default target model/level** and (optional) **persona / context memory**.
 4. Anywhere on Windows — ChatGPT Desktop, Cursor, a browser, Word, Notion, a
    terminal — place the cursor in a text field with your rough prompt and press **Ctrl+Shift+O**.

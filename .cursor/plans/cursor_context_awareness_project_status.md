@@ -15,11 +15,11 @@ I'll look through the project for how context awareness is implemented and which
 
 Found the context-layer core — reading the implementation and current test status next.
 
-**Context awareness is shipped in PromptForge (v1+)** — destination context is captured at hotkey time and injected into the rewrite. Writing-mode eval has **not** fully converged on the context track, mainly for the same reasons as the core matrix (`explain` / corpus), not because context itself is broken.
+**Context awareness is shipped in Anvyll (v1+)** — destination context is captured at hotkey time and injected into the rewrite. Writing-mode eval has **not** fully converged on the context track, mainly for the same reasons as the core matrix (`explain` / corpus), not because context itself is broken.
 
 ## What it is
 
-Before the model call, PromptForge folds **where you are typing** into the request so the rewrite fits the destination (Slack vs Gmail vs Cursor chat vs terminal). That is the “context layer,” inspired by Wispr Flow’s approach.
+Before the model call, Anvyll folds **where you are typing** into the request so the rewrite fits the destination (Slack vs Gmail vs Cursor chat vs terminal). That is the “context layer,” inspired by Wispr Flow’s approach.
 
 Flow: hotkey snapshot → `assembleCaptureContext()` → overlay session → `captureContext` on optimize → `DESTINATION CONTEXT` block in the meta-prompt (`writing.ts` / `providers.ts`).
 
@@ -108,7 +108,7 @@ Your own plan already scoped out the high-risk bits (chat history, OCR, exclusio
 - **“Understands my whole screen / whole thread”**: aspirational; usually a multi-release bet, not a v1.1.  
 - **Best next bets if you want more magic:** reply-to / recipient cues in email & chat, better Cursor chat vs editor distinction, and standing context the user *wrote themselves* — not more silent scraping.
 
-If you describe the specific feature you’re imagining (even roughly), I can say whether it’s realistic for PromptForge’s hotkey path, or better as a Studio / opt-in path.
+If you describe the specific feature you’re imagining (even roughly), I can say whether it’s realistic for Anvyll’s hotkey path, or better as a Studio / opt-in path.
 
 ---
 
@@ -269,7 +269,7 @@ Rules:
 - If excerpt conflicts with the draft, the draft wins
 ```
 
-Standing user context stays a third line (“Works at Anvyl…”). Three channels, three jobs.
+Standing user context stays a third line (“Works at Anvyll…”). Three channels, three jobs.
 
 ---
 

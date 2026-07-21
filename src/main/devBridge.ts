@@ -6,7 +6,7 @@ import type { OptimizeRequest, OptimizeWithRunId } from "../shared/types";
 import { runOptimize } from "./optimizeHandler";
 import * as store from "./storage";
 
-const DEV_BRIDGE_PORT = Number(process.env.PROMPTFORGE_DEV_BRIDGE_PORT ?? 5174);
+const DEV_BRIDGE_PORT = Number(process.env.ANVYLL_DEV_BRIDGE_PORT ?? 5174);
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -85,6 +85,6 @@ export function startDevBridge(): void {
   });
 
   server.listen(DEV_BRIDGE_PORT, "127.0.0.1", () => {
-    console.log(`[PromptForge] Dev bridge http://127.0.0.1:${DEV_BRIDGE_PORT}`);
+    console.log(`[Anvyll] Dev bridge http://127.0.0.1:${DEV_BRIDGE_PORT}`);
   });
 }

@@ -3,6 +3,7 @@ import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, s
 import { join } from "node:path";
 import { detectContextSummary } from "../shared/contextSummaryDetect";
 import { DEFAULT_SETTINGS, IPC, type AppSettings, type CaptureContext, type CaptureMode, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type OptimizeRequest, type OverlayPlacement, type Provider, type RunSurface, type SettingsSetResult, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
+import { normalizeTheme, type ThemeId } from "../shared/themes";
 import { resolveOverlayPosition } from "../shared/overlayPosition";
 import { acceleratorDisplayParts, normalizeAccelerator } from "../shared/accelerator";
 import { analyze } from "../engine/orchestrator";
@@ -21,6 +22,7 @@ import {
   canUseEarlyCaptureFastPath,
   warmCaptureBridge,
   getFrozenInjectHwnd,
+  getFrozenInjectHostKind,
   waitUntilForeground,
   hwndFromBuffer,
   sleep,
@@ -141,8 +143,8 @@ function createStudio(): BrowserWindow {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    title: "PromptForge Studio",
-    backgroundColor: "#0a0b0f",
+    title: "Anvyll Studio",
+    backgroundColor: "#170d0d",
     webPreferences: {
       preload: join(__dirname, "..", "preload", "index.js"),
       contextIsolation: true,
@@ -215,9 +217,9 @@ async function deliverCaptureToOverlay(capture: {
     revealOverlay();
   }
   // On overlay focus (this delivery moment, incl. the second-show-while-open path)
-  // check the clipboard once for an ANVYL summary. capture.ts already restored the
+  // check the clipboard once for an Anvyll summary. capture.ts already restored the
   // pre-capture clipboard, so this reads what the user last copied (the AI's answer).
-  // Only text matching ANVYL's own format ever crosses IPC — the privacy boundary.
+  // Only text matching Anvyll's own format ever crosses IPC — the privacy boundary.
   const clip = clipboard.readText();
   const summaryScope = detectContextSummary(clip);
   const prepared = waitForOverlayPrepared();
@@ -300,6 +302,12 @@ function sendStudioRoute(route: string): void {
   studio?.webContents.send(IPC.STUDIO_ROUTE, route);
 }
 
+function broadcastTheme(theme: ThemeId): void {
+  const payload = { theme: normalizeTheme(theme) };
+  overlay?.webContents.send(IPC.SETTINGS_CHANGED, payload);
+  studio?.webContents.send(IPC.SETTINGS_CHANGED, payload);
+}
+
 function ensureStudio(route?: "settings"): void {
   if (!studio) {
     studio = createStudio();
@@ -350,6 +358,7 @@ async function showOverlayShell(): Promise<void> {
     });
   }
   revealOverlay();
+  broadcastTheme(store.getSettings().theme);
   const prepared = waitForOverlayPrepared();
   overlay.webContents.send(IPC.OVERLAY_SHOW, {
     text: "",
@@ -365,12 +374,12 @@ async function showOverlayShell(): Promise<void> {
 /** TEMP: dev-only — remove when context-layer manual testing is done. */
 function logCaptureContextDev(context: CaptureContext | undefined): void {
   if (context) {
-    console.log("[PromptForge] captureContext:\n", JSON.stringify(context, null, 2));
+    console.log("[Anvyll] captureContext:\n", JSON.stringify(context, null, 2));
     return;
   }
   const screenOn = store.getSettings().screenContext;
   console.log(
-    `[PromptForge] captureContext: null (${screenOn ? "password field or no destination signals" : "screenContext off"})`,
+    `[Anvyll] captureContext: null (${screenOn ? "password field or no destination signals" : "screenContext off"})`,
   );
 }
 
@@ -390,11 +399,11 @@ async function triggerHotkey(): Promise<void> {
 
     const tShell = isDev ? Date.now() : 0;
     await showOverlayShell();
-    if (isDev) console.log(`[PromptForge] overlay shell: ${Date.now() - tShell}ms`);
+    if (isDev) console.log(`[Anvyll] overlay shell: ${Date.now() - tShell}ms`);
 
     const tSnap = isDev ? Date.now() : 0;
     await hotkeySnapshot();
-    if (isDev) console.log(`[PromptForge] hotkey snapshot: ${Date.now() - tSnap}ms`);
+    if (isDev) console.log(`[Anvyll] hotkey snapshot: ${Date.now() - tSnap}ms`);
 
     if (!canUseEarlyCaptureFastPath()) {
       await hideForCapture();
@@ -403,15 +412,15 @@ async function triggerHotkey(): Promise<void> {
     const tCap = isDev ? Date.now() : 0;
     const capture = await captureSelection();
     if (isDev) {
-      console.log(`[PromptForge] capture: ${Date.now() - tCap}ms`);
+      console.log(`[Anvyll] capture: ${Date.now() - tCap}ms`);
       logCaptureContextDev(capture.context);
     }
 
     const tDeliver = isDev ? Date.now() : 0;
     await deliverCaptureToOverlay(capture);
     if (isDev) {
-      console.log(`[PromptForge] deliver: ${Date.now() - tDeliver}ms`);
-      console.log(`[PromptForge] hotkey total: ${Date.now() - t0}ms`);
+      console.log(`[Anvyll] deliver: ${Date.now() - tDeliver}ms`);
+      console.log(`[Anvyll] hotkey total: ${Date.now() - t0}ms`);
     }
   } finally {
     hotkeyInFlight = false;
@@ -422,7 +431,7 @@ async function triggerHotkey(): Promise<void> {
 let activeHotkey: string | null = null;
 
 function updateTrayTooltip(hotkey: string): void {
-  tray?.setToolTip(`PromptForge — ${acceleratorDisplayParts(hotkey).join("+")}`);
+  tray?.setToolTip(`Anvyll — ${acceleratorDisplayParts(hotkey).join("+")}`);
 }
 
 /**
@@ -441,7 +450,7 @@ function applyHotkey(accelerator: string): { ok: boolean; error?: string } {
         void triggerHotkey();
       });
     } catch (e) {
-      console.warn(`PromptForge: hotkey "${acc}" rejected:`, e);
+      console.warn(`Anvyll: hotkey "${acc}" rejected:`, e);
       return false;
     }
   };
@@ -455,10 +464,10 @@ function applyHotkey(accelerator: string): { ok: boolean; error?: string } {
   }
   if (!register(norm)) {
     if (prev && register(prev)) {
-      console.warn(`PromptForge: failed to register hotkey ${norm}; kept ${prev}`);
+      console.warn(`Anvyll: failed to register hotkey ${norm}; kept ${prev}`);
     } else {
       activeHotkey = null;
-      console.warn(`PromptForge: failed to register hotkey ${norm}`);
+      console.warn(`Anvyll: failed to register hotkey ${norm}`);
     }
     return { ok: false, error: "already in use by another application" };
   }
@@ -524,8 +533,11 @@ function registerIpc(): void {
     const injectHwnd = getFrozenInjectHwnd();
     if (injectHwnd) {
       await waitUntilForeground(injectHwnd);
-      // Let the target app restore internal focus (terminal pane) after overlay hide.
-      await sleep(200);
+      // Terminals need a beat to restore internal pane focus after overlay hide.
+      // Chromium/rich editors don't — the foreground poll already confirmed focus.
+      if (getFrozenInjectHostKind() !== "chromium") {
+        await sleep(200);
+      }
     }
     const res = await injectText(text, snap);
     if (res === "injected") {
@@ -545,10 +557,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.SETTINGS_GET, () => {
     try {
       const s = store.getSettings();
-      console.log("[PromptForge] SETTINGS_GET ->", s);
+      console.log("[Anvyll] SETTINGS_GET ->", s);
       return s;
     } catch (e) {
-      console.error("[PromptForge] SETTINGS_GET failed:", e);
+      console.error("[Anvyll] SETTINGS_GET failed:", e);
       throw e;
     }
   });
@@ -568,14 +580,19 @@ function registerIpc(): void {
         hotkey = prev.hotkey;
       }
     }
-    const persisted: AppSettings = { ...s, hotkey };
+    const persisted: AppSettings = { ...s, hotkey, theme: normalizeTheme(s.theme) };
     store.setSettings(persisted);
+    broadcastTheme(persisted.theme);
     return {
       ok: !hotkeyError,
       settings: persisted,
       hotkeyError,
       hotkeyActive: activeHotkey !== null && globalShortcut.isRegistered(activeHotkey),
     };
+  });
+
+  ipcMain.on(IPC.SETTINGS_THEME_PREVIEW, (_evt, theme: ThemeId) => {
+    broadcastTheme(theme);
   });
 
   ipcMain.handle(IPC.HOTKEY_STATUS, (): HotkeyStatus => ({
@@ -590,7 +607,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.KEYS_HAS, (_evt, provider: Provider) => keyStore.has(provider));
   ipcMain.handle(IPC.KEYS_DELETE, (_evt, provider: Provider) => { keyStore.delete(provider); return true; });
   ipcMain.handle(IPC.KEYS_PROVIDERS, () => keyStore.providers());
-  ipcMain.handle("promptforge:keys:secure", () => keyStore.isSecure());
+  ipcMain.handle("anvyll:keys:secure", () => keyStore.isSecure());
 
   ipcMain.handle(IPC.LIBRARY_LIST, () => store.listLibrary());
   ipcMain.handle(IPC.LIBRARY_SAVE, (_evt, input: any) => store.saveLibrary(input));
@@ -698,7 +715,7 @@ app.whenReady().then(() => {
   const hk = applyHotkey(settings.hotkey);
   if (!hk.ok && settings.hotkey !== DEFAULT_SETTINGS.hotkey) {
     // Heal a corrupt/unregisterable stored hotkey so the app is never hotkey-less.
-    console.warn(`PromptForge: stored hotkey "${settings.hotkey}" failed (${hk.error}); reverting to default`);
+    console.warn(`Anvyll: stored hotkey "${settings.hotkey}" failed (${hk.error}); reverting to default`);
     if (applyHotkey(DEFAULT_SETTINGS.hotkey).ok) {
       store.setSettings({ ...settings, hotkey: DEFAULT_SETTINGS.hotkey });
     }

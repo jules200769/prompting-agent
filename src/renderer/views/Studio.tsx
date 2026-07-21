@@ -7,6 +7,8 @@ import { ScoreRing, RubricChips, ScoreLift } from "../components/Score";
 import { DiffView } from "../components/DiffView";
 import { ToastProvider, useToast } from "../components/Toast";
 import { HotkeyField } from "../components/HotkeyField";
+import { ThemeGallery } from "../components/ThemeGallery";
+import { applyThemeToDocument } from "../../shared/themes";
 
 type Tab = "workbench" | "library" | "history" | "settings";
 
@@ -24,7 +26,11 @@ function StudioShell() {
   const [seed, setSeed] = useState<WorkbenchSeed | null>(null);
 
   useEffect(() => {
-    (async () => setSettings(await api.settingsGet()))();
+    (async () => {
+      const loaded = await api.settingsGet();
+      setSettings(loaded);
+      applyThemeToDocument(loaded.theme);
+    })();
     const off = api.onStudioRoute((route) => {
       if (route === "settings") setTab("settings");
     });
@@ -44,19 +50,19 @@ function StudioShell() {
   };
 
   return (
-    <div className="h-full flex bg-bg-950 text-slate-100">
+    <div className="studio-shell h-full flex bg-bg-950 text-ink">
       {/* Left rail */}
-      <aside className="w-52 shrink-0 border-r border-line bg-bg-900 flex flex-col">
+      <aside className="studio-aside w-52 shrink-0 border-r flex flex-col">
         <div className="px-4 py-4 flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-accent" />
-          <span className="font-semibold tracking-tight">PromptForge</span>
+          <span className="font-display font-semibold tracking-tight">Anvyll</span>
         </div>
         <nav className="px-2 space-y-0.5">
           {(["workbench", "library", "history", "settings"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`w-full text-left px-3 py-2 rounded-md text-sm capitalize ${tab === t ? "bg-bg-800 text-white" : "text-muted hover:text-slate-200 hover:bg-bg-850"}`}
+              className={`w-full text-left px-3 py-2 rounded-md text-sm capitalize ${tab === t ? "bg-bg-800 text-ink" : "text-muted hover:text-ink/90 hover:bg-bg-850"}`}
             >
               {t}
             </button>
@@ -185,7 +191,7 @@ function Workbench({
         <span className="text-[10px] text-muted">L{level} {LEVEL_LABELS[level]} target</span>
         <div className="ml-auto flex gap-2">
           <button onClick={runAnalyze} className="text-xs px-3 py-1 rounded-md border border-line">Analyze</button>
-          <button onClick={runOptimize} disabled={busy} className="text-xs px-3 py-1 rounded-md bg-accent text-white disabled:opacity-40">{busy ? "Optimizing…" : "Optimize"}</button>
+          <button onClick={runOptimize} disabled={busy} className="text-xs px-3 py-1 rounded-md btn-accent disabled:opacity-40">{busy ? "Optimizing…" : "Optimize"}</button>
         </div>
       </div>
 
@@ -278,7 +284,7 @@ function Workbench({
           </div>
           <div className="flex flex-col gap-2">
             <button onClick={() => void copyOptimized()} className="text-xs px-3 py-1 rounded-md border border-line">Copy</button>
-            <button onClick={saveToLibrary} className="text-xs px-3 py-1 rounded-md bg-accent text-white">Save to library</button>
+            <button onClick={saveToLibrary} className="text-xs px-3 py-1 rounded-md btn-accent">Save to library</button>
           </div>
         </div>
       )}
@@ -594,7 +600,7 @@ function History({ onOpen }: { onOpen: (seed: WorkbenchSeed) => void }) {
                     <button
                       onClick={() => void saveComment(h.id)}
                       disabled={!commentDraft.trim() && !commentVerdict}
-                      className="text-xs px-3 py-1 rounded-md bg-accent text-white disabled:opacity-40"
+                      className="text-xs px-3 py-1 rounded-md btn-accent disabled:opacity-40"
                     >
                       Save comment
                     </button>
@@ -619,11 +625,18 @@ function Settings() {
   const toast = useToast();
 
   useEffect(() => {
-    void api.settingsGet().then(setS).catch((e) => { console.error("settingsGet failed", e); });
+    void api.settingsGet().then((loaded) => {
+      setS(loaded);
+      applyThemeToDocument(loaded.theme);
+    }).catch((e) => { console.error("settingsGet failed", e); });
     void api.hotkeyStatus().then(setHotkeyStatus).catch((e) => console.error("hotkeyStatus failed", e));
     void api.keysHas("openai").then(setHasOpenAiKey).catch((e) => console.error("keysHas failed", e));
     void api.keysIsSecure().then(setIsSecure).catch((e) => console.error("keysIsSecure failed", e));
   }, []);
+
+  useEffect(() => {
+    if (s) applyThemeToDocument(s.theme);
+  }, [s?.theme]);
 
   if (!s) return <div className="p-8 text-muted">Loading…</div>;
 
@@ -707,14 +720,25 @@ function Settings() {
               <input type="checkbox" checked={s.telemetry} onChange={(e) => update({ telemetry: e.target.checked })} />
               Allow anonymous telemetry
             </label>
-            <button onClick={save} className="px-4 py-2 rounded-md bg-accent text-white text-sm font-medium">Save settings</button>
+            <Field label="Theme">
+              <ThemeGallery
+                value={s.theme}
+                onChange={(theme) => {
+                  update({ theme });
+                  applyThemeToDocument(theme);
+                  api.previewTheme(theme);
+                }}
+              />
+              <p className="text-[10px] text-muted mt-2">Applies instantly. Save settings to keep your choice.</p>
+            </Field>
+            <button onClick={save} className="px-4 py-2 rounded-md btn-accent text-sm font-medium">Save settings</button>
           </div>
         </section>
 
         <section>
           <h3 className="font-semibold mb-1">OpenAI API key</h3>
           <p className="text-muted text-xs mb-4">
-            PromptForge uses {REWRITE_CONFIG.label} to generate all optimizations. The chosen target-model pack supplies the prompt-engineering expertise. Keys are encrypted with the OS Credential Manager and never leave this machine. Without a key, optimization is unavailable — PromptForge never substitutes generic output.
+            Anvyll uses {REWRITE_CONFIG.label} to generate all optimizations. The chosen target-model pack supplies the prompt-engineering expertise. Keys are encrypted with the OS Credential Manager and never leave this machine. Without a key, optimization is unavailable — Anvyll never substitutes generic output.
           </p>
           <div className="flex items-center gap-2">
             <div className="w-40">
@@ -728,7 +752,7 @@ function Settings() {
               placeholder={hasOpenAiKey ? "•••• stored ••••" : "paste key…"}
               className="flex-1 bg-bg-800 border border-line rounded-md text-sm px-2 py-1.5"
             />
-            <button onClick={() => saveKey()} className="text-xs px-3 py-1.5 rounded-md bg-accent text-white">Save</button>
+            <button onClick={() => saveKey()} className="text-xs px-3 py-1.5 rounded-md btn-accent">Save</button>
             {hasOpenAiKey && <button onClick={() => deleteKey()} className="text-xs px-2 py-1.5 rounded-md text-bad">remove</button>}
           </div>
         </section>

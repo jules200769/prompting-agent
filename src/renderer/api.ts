@@ -1,5 +1,6 @@
 // Renderer-side typed accessor for the preload bridge.
-import type { PromptForgeAPI } from "../preload";
+import type { AnvyllAPI } from "../preload";
+import { normalizeTheme, applyThemeToDocument, type ThemeId } from "../shared/themes";
 import {
   DEFAULT_SETTINGS,
   type AppSettings,
@@ -30,9 +31,9 @@ import {
 
 declare global {
   interface Window {
-    promptforge: PromptForgeAPI;
+    anvyll: AnvyllAPI;
     /** Set true by the browser mock so previews can show a dev badge. */
-    __promptforgeMock?: boolean;
+    __anvyllMock?: boolean;
   }
 }
 
@@ -43,7 +44,7 @@ type OverlayShowPayload = {
   terminalContext?: boolean;
   /** Dev bridge / browser mock never seed destination context. */
   context?: CaptureContext;
-  /** ANVYL summary detected on the clipboard at delivery — drives the consent toast. */
+  /** Anvyll summary detected on the clipboard at delivery — drives the consent toast. */
   clipboardSummary?: { scope: ContextImportScope; text: string };
 };
 
@@ -81,7 +82,9 @@ function mockEvictProjects(): void {
   }
 }
 
-function createBrowserMock(): PromptForgeAPI {
+const mockSettingsChangedCallbacks = new Set<(theme: ThemeId) => void>();
+
+function createBrowserMock(): AnvyllAPI {
   const SAMPLE_PROMPT =
     "write a function that fetches users from an api and shows them in a list";
 
@@ -98,7 +101,7 @@ function createBrowserMock(): PromptForgeAPI {
 
     captureTrigger: async () => undefined,
     captureInject: async () => {
-      console.info("[promptforge mock] Apply (inject) called — no-op in browser preview");
+      console.info("[anvyll mock] Apply (inject) called — no-op in browser preview");
       return "injected" as InjectResult;
     },
     captureCopy: async (text: string) => {
@@ -112,7 +115,8 @@ function createBrowserMock(): PromptForgeAPI {
 
     settingsGet: async () => {
       try {
-        return await devBridgeSettingsGet();
+        const s = await devBridgeSettingsGet();
+        return { ...s, theme: normalizeTheme(s.theme) };
       } catch {
         return { ...DEFAULT_SETTINGS };
       }
@@ -122,6 +126,10 @@ function createBrowserMock(): PromptForgeAPI {
       settings: s,
       hotkeyActive: false,
     }),
+    previewTheme: (theme: ThemeId) => {
+      applyThemeToDocument(theme);
+      for (const cb of mockSettingsChangedCallbacks) cb(theme);
+    },
     hotkeyStatus: async () => ({ accelerator: DEFAULT_SETTINGS.hotkey, active: false }),
 
     keysSet: async () => undefined,
@@ -313,7 +321,7 @@ function createBrowserMock(): PromptForgeAPI {
       window.location.hash = "#/studio/settings";
     },
     finishOnboarding: () => {
-      console.info("[promptforge mock] finishOnboarding called — no-op in browser preview");
+      console.info("[anvyll mock] finishOnboarding called — no-op in browser preview");
     },
     openExternal: async (url: string) => {
       window.open(url, "_blank", "noopener");
@@ -324,7 +332,7 @@ function createBrowserMock(): PromptForgeAPI {
     },
     onStudioWorkbench: () => () => undefined,
     hideOverlay: () => {
-      console.info("[promptforge mock] hideOverlay called — no-op in browser preview");
+      console.info("[anvyll mock] hideOverlay called — no-op in browser preview");
     },
     overlayPrepared: () => undefined,
     setOverlayPlacement: async (_placement: OverlayPlacement) => true,
@@ -340,16 +348,20 @@ function createBrowserMock(): PromptForgeAPI {
 
     onOverlayCapturePending: () => () => undefined,
     onOverlayClear: () => () => undefined,
-  } satisfies PromptForgeAPI;
+    onSettingsChanged: (cb) => {
+      mockSettingsChangedCallbacks.add(cb);
+      return () => mockSettingsChangedCallbacks.delete(cb);
+    },
+  } satisfies AnvyllAPI;
 }
 
-const real = (window as any).promptforge as PromptForgeAPI | undefined;
+const real = (window as any).anvyll as AnvyllAPI | undefined;
 
 if (!real) {
-  window.__promptforgeMock = true;
+  window.__anvyllMock = true;
 }
 
-export const api: PromptForgeAPI = real ?? createBrowserMock();
+export const api: AnvyllAPI = real ?? createBrowserMock();
 
 /** True when running outside Electron against the mock bridge. */
 export const isBrowserMock = !real;

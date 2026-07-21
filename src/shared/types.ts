@@ -1,5 +1,7 @@
 // Shared types between main process, preload, and renderer.
 
+import type { ThemeId } from "./themes";
+
 export type ModelId =
   | "claude-opus-4.8"
   | "gpt-5"
@@ -363,6 +365,9 @@ export function isOverlayPlacement(value: unknown): value is OverlayPlacement {
   return typeof value === "string" && (OVERLAY_PLACEMENTS as string[]).includes(value);
 }
 
+export type { ThemeId } from "./themes";
+export { THEME_IDS, THEME_META, normalizeTheme, resolveOverlayTheme, applyThemeToDocument } from "./themes";
+
 export interface AppSettings {
   hotkey: string; // e.g. "CommandOrControl+Shift+O"
   defaultModel: ModelId;
@@ -372,7 +377,7 @@ export interface AppSettings {
   managedEnabled: boolean;
   providerKeys: Partial<Record<Provider, boolean>>; // presence flags only (keys live in OS keychain)
   telemetry: boolean;
-  theme: "dark" | "light";
+  theme: ThemeId;
   overlayPlacement: OverlayPlacement;
   onboardingDone: boolean;
   /** Hotkey may read active-app title/site/surrounding text to tailor rewrites; off = prompt text only. */
@@ -392,7 +397,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   managedEnabled: false,
   providerKeys: {},
   telemetry: false,
-  theme: "dark",
+  theme: "ember-forge",
   overlayPlacement: "center",
   onboardingDone: false,
   screenContext: true,
@@ -436,56 +441,58 @@ export const RUBRIC_KEYS: (keyof SubScores)[] = [
 
 // IPC channels
 export const IPC = {
-  OPTIMIZE: "promptforge:optimize",
-  ANALYZE: "promptforge:analyze",
-  CAPTURE_TRIGGER: "promptforge:capture:trigger",
-  CAPTURE_INJECT: "promptforge:capture:inject",
-  CAPTURE_COPY: "promptforge:capture:copy",
-  SETTINGS_GET: "promptforge:settings:get",
-  SETTINGS_SET: "promptforge:settings:set",
-  HOTKEY_STATUS: "promptforge:hotkey:status",
-  KEYS_SET: "promptforge:keys:set",
-  KEYS_HAS: "promptforge:keys:has",
-  KEYS_DELETE: "promptforge:keys:delete",
-  KEYS_PROVIDERS: "promptforge:keys:providers",
-  LIBRARY_LIST: "promptforge:library:list",
-  LIBRARY_SAVE: "promptforge:library:save",
-  LIBRARY_DELETE: "promptforge:library:delete",
-  HISTORY_LIST: "promptforge:history:list",
-  HISTORY_CLEAR: "promptforge:history:clear",
-  HISTORY_ADD_COMMENT: "promptforge:history:add-comment",
-  HISTORY_FINALIZE: "promptforge:history:finalize",
-  HISTORY_ANALYSIS_PATH: "promptforge:history:analysis-path",
-  SESSION_LIST: "promptforge:session:list",
-  SESSION_CREATE: "promptforge:session:create",
-  SESSION_SET_CONTEXT: "promptforge:session:set-context",
-  SESSION_CLEAR: "promptforge:session:clear",
-  SESSION_DELETE: "promptforge:session:delete",
-  SESSION_SET_ACTIVE: "promptforge:session:set-active",
-  SESSION_GET_ACTIVE: "promptforge:session:get-active",
-  SESSION_MAYBE_TITLE_FROM_PROMPT: "promptforge:session:maybe-title-from-prompt",
-  PROJECT_CONTEXT_GET: "promptforge:project-context:get",
-  PROJECT_CONTEXT_SET: "promptforge:project-context:set",
-  PROJECT_LIST: "promptforge:project:list",
-  PROJECT_UPSERT_ACTIVE: "promptforge:project:upsert-active",
-  PROJECT_SET_CONTEXT_BY_ID: "promptforge:project:set-context-by-id",
-  PROJECT_SET_ACTIVE: "promptforge:project:set-active",
-  PROJECT_DELETE: "promptforge:project:delete",
-  OVERLAY_SHOW: "promptforge:overlay:show",
-  OVERLAY_CAPTURE_PENDING: "promptforge:overlay:capture-pending",
-  OVERLAY_PREPARED: "promptforge:overlay:prepared",
-  OVERLAY_HIDE: "promptforge:overlay:hide",
-  OVERLAY_CLEAR: "promptforge:overlay:clear",
-  OVERLAY_PLACEMENT_SET: "promptforge:overlay:placement-set",
-  STUDIO_SHOW: "promptforge:studio:show",
-  STUDIO_SETTINGS: "promptforge:studio:settings",
-  STUDIO_ROUTE: "promptforge:studio:route",
-  TRAY_QUIT: "promptforge:tray:quit",
-  OPTIMIZE_STREAM: "promptforge:optimize:stream",
-  ONBOARDING_FINISH: "promptforge:onboarding:finish",
-  SHELL_OPEN_EXTERNAL: "promptforge:shell:open-external",
-  STUDIO_OPEN_WORKBENCH: "promptforge:studio:open-workbench",
-  STUDIO_WORKBENCH_SEED: "promptforge:studio:workbench-seed",
+  OPTIMIZE: "anvyll:optimize",
+  ANALYZE: "anvyll:analyze",
+  CAPTURE_TRIGGER: "anvyll:capture:trigger",
+  CAPTURE_INJECT: "anvyll:capture:inject",
+  CAPTURE_COPY: "anvyll:capture:copy",
+  SETTINGS_GET: "anvyll:settings:get",
+  SETTINGS_SET: "anvyll:settings:set",
+  SETTINGS_CHANGED: "anvyll:settings:changed",
+  SETTINGS_THEME_PREVIEW: "anvyll:settings:theme-preview",
+  HOTKEY_STATUS: "anvyll:hotkey:status",
+  KEYS_SET: "anvyll:keys:set",
+  KEYS_HAS: "anvyll:keys:has",
+  KEYS_DELETE: "anvyll:keys:delete",
+  KEYS_PROVIDERS: "anvyll:keys:providers",
+  LIBRARY_LIST: "anvyll:library:list",
+  LIBRARY_SAVE: "anvyll:library:save",
+  LIBRARY_DELETE: "anvyll:library:delete",
+  HISTORY_LIST: "anvyll:history:list",
+  HISTORY_CLEAR: "anvyll:history:clear",
+  HISTORY_ADD_COMMENT: "anvyll:history:add-comment",
+  HISTORY_FINALIZE: "anvyll:history:finalize",
+  HISTORY_ANALYSIS_PATH: "anvyll:history:analysis-path",
+  SESSION_LIST: "anvyll:session:list",
+  SESSION_CREATE: "anvyll:session:create",
+  SESSION_SET_CONTEXT: "anvyll:session:set-context",
+  SESSION_CLEAR: "anvyll:session:clear",
+  SESSION_DELETE: "anvyll:session:delete",
+  SESSION_SET_ACTIVE: "anvyll:session:set-active",
+  SESSION_GET_ACTIVE: "anvyll:session:get-active",
+  SESSION_MAYBE_TITLE_FROM_PROMPT: "anvyll:session:maybe-title-from-prompt",
+  PROJECT_CONTEXT_GET: "anvyll:project-context:get",
+  PROJECT_CONTEXT_SET: "anvyll:project-context:set",
+  PROJECT_LIST: "anvyll:project:list",
+  PROJECT_UPSERT_ACTIVE: "anvyll:project:upsert-active",
+  PROJECT_SET_CONTEXT_BY_ID: "anvyll:project:set-context-by-id",
+  PROJECT_SET_ACTIVE: "anvyll:project:set-active",
+  PROJECT_DELETE: "anvyll:project:delete",
+  OVERLAY_SHOW: "anvyll:overlay:show",
+  OVERLAY_CAPTURE_PENDING: "anvyll:overlay:capture-pending",
+  OVERLAY_PREPARED: "anvyll:overlay:prepared",
+  OVERLAY_HIDE: "anvyll:overlay:hide",
+  OVERLAY_CLEAR: "anvyll:overlay:clear",
+  OVERLAY_PLACEMENT_SET: "anvyll:overlay:placement-set",
+  STUDIO_SHOW: "anvyll:studio:show",
+  STUDIO_SETTINGS: "anvyll:studio:settings",
+  STUDIO_ROUTE: "anvyll:studio:route",
+  TRAY_QUIT: "anvyll:tray:quit",
+  OPTIMIZE_STREAM: "anvyll:optimize:stream",
+  ONBOARDING_FINISH: "anvyll:onboarding:finish",
+  SHELL_OPEN_EXTERNAL: "anvyll:shell:open-external",
+  STUDIO_OPEN_WORKBENCH: "anvyll:studio:open-workbench",
+  STUDIO_WORKBENCH_SEED: "anvyll:studio:workbench-seed",
 } as const;
 
 /** Payload for opening the Studio workbench pre-seeded from the overlay or a saved item. */

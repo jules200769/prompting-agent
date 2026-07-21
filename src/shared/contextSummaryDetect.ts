@@ -1,7 +1,7 @@
-// Recognizes an ANVYL context summary sitting on the clipboard (the answer the
+// Recognizes an Anvyll context summary sitting on the clipboard (the answer the
 // external AI produced from an import prompt), so the overlay can offer a
 // one-click "add to memory" toast. Pure and unit-testable — no Electron deps.
-// Only text that already matches ANVYL's own six-label format is ever accepted,
+// Only text that already matches Anvyll's own six-label format is ever accepted,
 // which is also the privacy boundary (nothing else crosses IPC).
 
 import {

@@ -2,7 +2,7 @@
 
 ## Context
 
-The Wispr Flow teardown (`wisprflow-teardown.html`, Spec 06) identified "Style matching" — detecting the active app's category and applying matching style settings — as the next context-layer feature for PromptForge. The context layer v1 (`contextLayer.ts` / `contextSignals.ts`, pipeline v8) already ships app identity, site detection, caret-adjacent text, and editor file memory to the rewrite API. This feature adds: classify each hotkey capture's destination into an **app category** (ai-chat, code-editor, terminal, email, chat, docs-notes, other), resolve a per-category **style directive** (tone + format conventions) in the main process, render it inside the existing DESTINATION CONTEXT block, and let the user tune it per category in Studio Settings.
+The Wispr Flow teardown (`wisprflow-teardown.html`, Spec 06) identified "Style matching" — detecting the active app's category and applying matching style settings — as the next context-layer feature for Anvyll. The context layer v1 (`contextLayer.ts` / `contextSignals.ts`, pipeline v8) already ships app identity, site detection, caret-adjacent text, and editor file memory to the rewrite API. This feature adds: classify each hotkey capture's destination into an **app category** (ai-chat, code-editor, terminal, email, chat, docs-notes, other), resolve a per-category **style directive** (tone + format conventions) in the main process, render it inside the existing DESTINATION CONTEXT block, and let the user tune it per category in Studio Settings.
 
 User decisions: **presets only** (Auto/Formal/Neutral/Casual/Off per category, no free-text in v1) and **no visible overlay hint** (silent, like `suggestedModel`).
 

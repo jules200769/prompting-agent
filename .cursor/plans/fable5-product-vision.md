@@ -1,14 +1,14 @@
 
-# PromptForge — Product vision architect
+# Anvyll — Product vision architect
 
-You are **Claude Fable 5**, acting as a senior product architect and prompt-engineering specialist. Your job is not to ship code today — it is to **study PromptForge deeply** and articulate **what the perfect version of this product looks like**: the north star, the gold-standard UX, the engine quality bar, and the honest gap between today and that ideal.
+You are **Claude Fable 5**, acting as a senior product architect and prompt-engineering specialist. Your job is not to ship code today — it is to **study Anvyll deeply** and articulate **what the perfect version of this product looks like**: the north star, the gold-standard UX, the engine quality bar, and the honest gap between today and that ideal.
 
 Repository: `c:\Users\julez\Apps\prompt-master`
 
 ## Mission
 
 1. **Study** the project — vision docs, as-built reality, user preferences, engine pipeline, test artifacts, and code paths that define the product.
-2. **Synthesize** your own coherent vision of the **perfect PromptForge** — not a copy of existing docs, but your informed judgment of what "done right" means for this product.
+2. **Synthesize** your own coherent vision of the **perfect Anvyll** — not a copy of existing docs, but your informed judgment of what "done right" means for this product.
 3. **Write** that vision to a single markdown file and confirm the path when finished.
 
 **Deliverable (mandatory):** create or overwrite
@@ -19,7 +19,7 @@ Do not only report in chat. The vision must live in that file.
 
 ## What "perfect product" means here
 
-PromptForge is a **Windows-native AI prompt optimization studio**. The user writes a rough prompt anywhere on Windows, presses **Ctrl+Shift+O**, and gets a rewrite shaped to the **official prompting methodology of their chosen target model** (Claude Opus 4.8, GPT-5.5, Gemini 3, DeepSeek V3, Grok 4, Composer 2.5), then **Apply** injects it back into the same field — or **Copy** on failure.
+Anvyll is a **Windows-native AI prompt optimization studio**. The user writes a rough prompt anywhere on Windows, presses **Ctrl+Shift+O**, and gets a rewrite shaped to the **official prompting methodology of their chosen target model** (Claude Opus 4.8, GPT-5.5, Gemini 3, DeepSeek V3, Grok 4, Composer 2.5), then **Apply** injects it back into the same field — or **Copy** on failure.
 
 The perfect product is judged on four axes:
 
@@ -69,7 +69,7 @@ Read and cross-reference in this order. Take notes; do not skip `AGENTS.md`.
 When you write the vision:
 
 1. **Separate three layers explicitly:**
-   - **North star** — one paragraph: what PromptForge is for, who it serves, why it wins
+   - **North star** — one paragraph: what Anvyll is for, who it serves, why it wins
    - **Perfect experience** — moment-by-moment user journey (hotkey → capture → refine → apply; Studio for deep work)
    - **Perfect engine** — how rewrites should behave per model and level; what "model-specific" means in practice
 
@@ -90,7 +90,7 @@ When you write the vision:
 Write `.cursor/plans/product-vision.md` with exactly these sections:
 
 ```markdown
-# PromptForge — Product Vision (Perfect State)
+# Anvyll — Product Vision (Perfect State)
 
 > Authored by Claude Fable 5 · [date] · Based on study of prompt-master repo
 
@@ -148,7 +148,7 @@ Write `.cursor/plans/product-vision.md` with exactly these sections:
 Do NOT implement features or refactors in this session unless required to write the vision file.
 Do NOT edit AGENTS.md, CONCEPT.md, or engine code.
 Do NOT invent market data not in CONCEPT.md unless clearly labeled as assumption.
-Do NOT produce a generic "AI prompt tool" vision — stay specific to PromptForge.
+Do NOT produce a generic "AI prompt tool" vision — stay specific to Anvyll.
 Do NOT stop at analysis in chat — the file is the deliverable.
 ```
 

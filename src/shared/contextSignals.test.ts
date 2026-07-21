@@ -106,7 +106,7 @@ describe("isLikelyFileName", () => {
   });
 
   it("rejects workspace names and non-source extensions", () => {
-    expect(isLikelyFileName("Anvyl.ai")).toBe(false);
+    expect(isLikelyFileName("anvyll.app")).toBe(false);
     expect(isLikelyFileName("foo.bar")).toBe(false);
     expect(isLikelyFileName("project.xyz")).toBe(false);
   });
@@ -116,7 +116,7 @@ describe("hasSourceFileExtension", () => {
   it("accepts known source extensions and rejects others", () => {
     expect(hasSourceFileExtension("storage.ts")).toBe(true);
     expect(hasSourceFileExtension("main.py")).toBe(true);
-    expect(hasSourceFileExtension("Anvyl.ai")).toBe(false);
+    expect(hasSourceFileExtension("anvyll.app")).toBe(false);
     expect(hasSourceFileExtension("notes.md")).toBe(false);
     expect(hasSourceFileExtension("noext")).toBe(false);
   });
@@ -175,7 +175,7 @@ describe("extractFileFromEditorTitle", () => {
   });
 
   it("ignores workspace names that are not source files", () => {
-    expect(extractFileFromEditorTitle("Anvyl.ai - Cursor", "cursor")).toBeNull();
+    expect(extractFileFromEditorTitle("anvyll.app - Cursor", "cursor")).toBeNull();
   });
 });
 
@@ -275,7 +275,7 @@ describe("buildDestinationContextBlock", () => {
 
   it("includes scope-discipline and file-vs-title rules", () => {
     const block = buildDestinationContextBlock({
-      app: { processName: "cursor", editorKind: "cursor", windowTitle: "Anvyl.ai - Cursor" },
+      app: { processName: "cursor", editorKind: "cursor", windowTitle: "anvyll.app - Cursor" },
       text: { scope: "field", hasSelection: false },
     });
     expect(block).toContain('Treat only the names under "Known project file names" as files');

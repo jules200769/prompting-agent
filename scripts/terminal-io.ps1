@@ -1,4 +1,4 @@
-# Shared terminal focus, keyboard input, and clipboard helpers for PromptForge PS scripts.
+# Shared terminal focus, keyboard input, and clipboard helpers for Anvyll PS scripts.
 #
 # AGENTS: This file DEFINES the shared `WinFg` C# type. Any script that dot-sources this file
 # (win-hotkey-snapshot.ps1, win-inject.ps1, ...) must NOT define its own `WinFg` unguarded —

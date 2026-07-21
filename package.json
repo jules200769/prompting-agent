@@ -1,8 +1,8 @@
 {
-  "name": "promptforge",
+  "name": "anvyll",
   "version": "0.1.0",
   "description": "Windows-native AI prompt optimization studio with a system-wide hotkey overlay.",
-  "author": "PromptForge",
+  "author": "Anvyll",
   "license": "UNLICENSED",
   "private": true,
   "main": "dist/main/main.js",
@@ -52,8 +52,8 @@
     "wait-on": "^9.0.0"
   },
   "build": {
-    "appId": "com.promptforge.app",
-    "productName": "PromptForge",
+    "appId": "com.anvyll.app",
+    "productName": "Anvyll",
     "files": [
       "dist/**/*",
       "dist-renderer/**/*",

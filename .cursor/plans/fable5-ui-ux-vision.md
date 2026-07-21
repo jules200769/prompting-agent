@@ -1,6 +1,6 @@
-# PromptForge — Fable 5 UI/UX vision (copy-paste prompt)
+# Anvyll — Fable 5 UI/UX vision (copy-paste prompt)
 
-Use this prompt in a **Claude Fable 5** session with full repo access. Fable studies the **visual and interaction design** of PromptForge and writes the **perfect UI/UX vision** to a markdown file.
+Use this prompt in a **Claude Fable 5** session with full repo access. Fable studies the **visual and interaction design** of Anvyll and writes the **perfect UI/UX vision** to a markdown file.
 
 Complements [`.cursor/plans/product-vision.md`](product-vision.md) (product north star) and [`.cursor/plans/fable5-product-vision.md`](fable5-product-vision.md) (how to generate that doc).
 
@@ -9,16 +9,16 @@ Complements [`.cursor/plans/product-vision.md`](product-vision.md) (product nort
 ## Full prompt (copy-paste)
 
 ```markdown
-# PromptForge — UI/UX vision architect
+# Anvyll — UI/UX vision architect
 
-You are **Claude Fable 5**, acting as a senior product designer and interaction specialist — the kind who ships Raycast-grade utility UX on Windows. Your job is **not** to write code today. It is to **study PromptForge's surfaces, components, and interaction contracts** and articulate **what perfect UI and UX looks like** for this app: visual language, layout, motion, states, keyboard flows, accessibility, and the honest gap between today's implementation and that ideal.
+You are **Claude Fable 5**, acting as a senior product designer and interaction specialist — the kind who ships Raycast-grade utility UX on Windows. Your job is **not** to write code today. It is to **study Anvyll's surfaces, components, and interaction contracts** and articulate **what perfect UI and UX looks like** for this app: visual language, layout, motion, states, keyboard flows, accessibility, and the honest gap between today's implementation and that ideal.
 
 Repository: `c:\Users\julez\Apps\prompt-master`
 
 ## Mission
 
 1. **Study** every user-facing surface — overlay, Studio, tray, onboarding gaps — plus the CSS/component code that implements them.
-2. **Synthesize** your own **perfect UI/UX vision** — not a screenshot of CONCEPT.md §7, not a generic "dark mode SaaS" brief, but a concrete design direction grounded in what PromptForge *is* (a reflex-speed Windows overlay + optional workbench).
+2. **Synthesize** your own **perfect UI/UX vision** — not a screenshot of CONCEPT.md §7, not a generic "dark mode SaaS" brief, but a concrete design direction grounded in what Anvyll *is* (a reflex-speed Windows overlay + optional workbench).
 3. **Write** that vision to a single markdown file.
 
 **Deliverable (mandatory):** create or overwrite
@@ -43,7 +43,7 @@ You may mention engine/output constraints when they **force** UX choices (e.g. t
 
 ## Design north star (starting hypothesis — validate or refine)
 
-PromptForge UX should feel like **a premium Windows utility that disappears into muscle memory**:
+Anvyll UX should feel like **a premium Windows utility that disappears into muscle memory**:
 
 - **Overlay = speed instrument.** Sparse, glass, keyboard-first, sub-150ms shell reveal. The user thinks "hotkey → better prompt → Apply" — never "open an app."
 - **Studio = explain & manage.** Denser, information-rich, Linear/Raycast polish — where scores, diffs, library, personas, and settings live.
@@ -173,7 +173,7 @@ CONCEPT §7 describes an ideal Studio; code in `Studio.tsx` is partial. Vision t
 Write `.cursor/plans/ui-ux-vision.md` with exactly these sections:
 
 ```markdown
-# PromptForge — UI/UX Vision (Perfect State)
+# Anvyll — UI/UX Vision (Perfect State)
 
 > Authored by Claude Fable 5 · [date] · Based on study of prompt-master repo
 
@@ -255,7 +255,7 @@ Default to **AGENTS.md + product-vision.md** for decisions already made; your jo
 
 Return briefly:
 1. Path to the UI/UX vision file
-2. One sentence: how perfect PromptForge should *feel*
+2. One sentence: how perfect Anvyll should *feel*
 3. Top 3 UI/UX gaps vs today
 4. Your recommendation on overlay keyboard focus (the open fork)
 ```

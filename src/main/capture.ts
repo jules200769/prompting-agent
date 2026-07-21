@@ -42,7 +42,7 @@ let getSkipHwnds: SkipHwndProvider = () => [];
 let getFallbackHwnd: () => number | null = () => null;
 let trackingInterval: ReturnType<typeof setInterval> | null = null;
 let pollInFlight = false;
-/** Last foreground window where the user was typing (Studio, Cursor, Chrome, …). */
+/** Last foreground window where the user was typing (Studio, Cursor, Chrome, ?). */
 let lastTrackedForegroundHwnd: number | null = null;
 let lastForegroundHwnd: number | null = null;
 /** UIA metadata for the text control captured at hotkey time (Chromium has NativeWindowHandle=0). */
@@ -63,7 +63,7 @@ export interface InjectTarget {
   hostKind: HostKind;
   processName?: string;
   topClassName?: string;
-  /** True for classic conhost — line-select uses Home/Shift+End instead of Ctrl+A. */
+  /** True for classic conhost ? line-select uses Home/Shift+End instead of Ctrl+A. */
   terminalUseConhostCopy?: boolean;
   /** Frozen terminal pane bounds from hotkey snapshot (inject focus when UIA resolve fails). */
   terminalBounds?: TerminalBounds;
@@ -83,7 +83,7 @@ let lastSnapshotContext: TerminalSnapshotContext = {};
 let pendingContextSignals: ContextSidecarSignals | null = null;
 /** App-identity signals from the last hotkey snapshot summary (context layer). */
 let pendingSnapshotSignals: SnapshotContextSignals = {};
-/** Focused element at hotkey time was a password field — nothing may be captured. */
+/** Focused element at hotkey time was a password field ? nothing may be captured. */
 let pendingIsPassword = false;
 
 async function readForegroundHwnd(): Promise<number> {
@@ -127,7 +127,7 @@ function psFile(args: string[]): Promise<{ stdout: string; code: number }> {
   });
 }
 
-/** Poll foreground and remember the last window (including PromptForge Studio). */
+/** Poll foreground and remember the last window (including Anvyll Studio). */
 export function startForegroundTracking(
   skipProvider: SkipHwndProvider,
   fallbackProvider?: () => number | null,
@@ -149,7 +149,7 @@ async function pollForeground(): Promise<void> {
       lastTrackedForegroundHwnd = hwnd;
     }
   } catch (err) {
-    console.warn("[PromptForge] foreground poll failed:", err);
+    console.warn("[Anvyll] foreground poll failed:", err);
   } finally {
     pollInFlight = false;
   }
@@ -171,7 +171,7 @@ async function refreshCaptureTargetFromForeground(): Promise<void> {
       return;
     }
   } catch (err) {
-    console.warn("[PromptForge] foreground read failed:", err);
+    console.warn("[Anvyll] foreground read failed:", err);
   }
   const fallback = normalizeHwnd(getFallbackHwnd() ?? 0);
   if (fallback > 0) {
@@ -206,7 +206,7 @@ export interface CaptureResult {
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   uia: UiaTargetMeta | null;
-  /** True when capture came from (or failed in) a terminal context — overlay shows terminal hint. */
+  /** True when capture came from (or failed in) a terminal context ? overlay shows terminal hint. */
   terminalContext?: boolean;
   /** Destination context for the rewrite (screenContext on, never for password fields). */
   context?: CaptureContext;
@@ -225,7 +225,7 @@ async function readCaptureMeta(metaPath: string): Promise<UiaTargetMeta | null> 
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
-      console.warn("[PromptForge] readCaptureMeta failed:", err);
+      console.warn("[Anvyll] readCaptureMeta failed:", err);
     }
     return null;
   }
@@ -283,6 +283,11 @@ function freezeTerminalInjectTarget(windowHwnd: number, ctx?: TerminalSnapshotCo
 export function getFrozenInjectHwnd(): number | null {
   const h = frozenInjectTarget?.windowHwnd ?? lastForegroundHwnd;
   return h != null && h > 0 ? h : null;
+}
+
+/** HostKind of the frozen inject target (lets main skip terminal-only settle waits). */
+export function getFrozenInjectHostKind(): HostKind | null {
+  return frozenInjectTarget?.hostKind ?? null;
 }
 
 /** Poll until the target window is foreground again after overlay hide. */
@@ -344,10 +349,10 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
   const preparedHwnd = lastForegroundHwnd ?? 0;
   allowSetForeground();
 
-  const metaPath = join(tmpdir(), `promptforge-uia-snapshot-${Date.now()}.json`);
-  const textPath = join(tmpdir(), `promptforge-uia-text-${Date.now()}.txt`);
+  const metaPath = join(tmpdir(), `anvyll-uia-snapshot-${Date.now()}.json`);
+  const textPath = join(tmpdir(), `anvyll-uia-text-${Date.now()}.txt`);
   const screenContextOn = getSettings().screenContext;
-  const contextPath = screenContextOn ? join(tmpdir(), `promptforge-ctx-${Date.now()}.json`) : null;
+  const contextPath = screenContextOn ? join(tmpdir(), `anvyll-ctx-${Date.now()}.json`) : null;
   pendingIsTerminal = false;
   lastSnapshotContext = {};
   pendingContextSignals = null;
@@ -405,12 +410,12 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
     };
 
     if (summary?.isPassword) {
-      // Focused element is a password field — nothing was (or may be) captured.
+      // Focused element is a password field ? nothing was (or may be) captured.
       pendingIsPassword = true;
       pendingUiaMeta = null;
       pendingCaptureText = null;
       pendingIsTerminal = false;
-      console.log("[PromptForge] hotkey snapshot: password field — capture skipped");
+      console.log("[Anvyll] hotkey snapshot: password field ? capture skipped");
       return null;
     }
 
@@ -437,7 +442,7 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
         pendingCaptureText = null;
       }
       console.log(
-        "[PromptForge] hotkey snapshot: terminal",
+        "[Anvyll] hotkey snapshot: terminal",
         summary?.className ?? "(unknown)",
         pendingCaptureText ? `${pendingCaptureText.length} chars selected` : "no selection",
       );
@@ -480,19 +485,19 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
       pendingContextSignals?.hasSelection &&
       (pendingContextSignals.selectedText?.trim()?.length ?? 0) > 0
     ) {
-      console.log("[PromptForge] hotkey snapshot: text selection present — compose mode (no draft)");
+      console.log("[Anvyll] hotkey snapshot: text selection present ? compose mode (no draft)");
       pendingCaptureText = null;
     }
 
     console.log(
-      "[PromptForge] hotkey snapshot:",
+      "[Anvyll] hotkey snapshot:",
       summary ? `hwnd ${summary.hwnd} uia ${summary.uia}` : stdout.trim(),
       meta ? meta.className : "(none)",
       pendingCaptureText ? `${pendingCaptureText.length} chars` : "no text",
     );
     return meta;
   } catch (err) {
-    console.warn("[PromptForge] hotkey snapshot failed:", err);
+    console.warn("[Anvyll] hotkey snapshot failed:", err);
     pendingUiaMeta = null;
     pendingCaptureText = null;
     pendingIsTerminal = false;
@@ -510,7 +515,7 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
 /** Whether pre-hide snapshot is enough to skip hide + win-capture.ps1. */
 export function canUseEarlyCaptureFastPath(): boolean {
   if (pendingIsTerminal) return true;
-  // UIA target known — including empty field compose — skip hideForCapture so the
+  // UIA target known ? including empty field compose ? skip hideForCapture so the
   // already-visible shell does not dim and pop back (looks like a second popup).
   if (pendingUiaMeta != null) return true;
   return shouldUseEarlyCaptureFastPath(pendingCaptureText, pendingUiaMeta != null);
@@ -524,7 +529,7 @@ export function canUseTerminalCapturePath(): boolean {
 /** Preload PowerShell + UIA assemblies so the first hotkey capture is not cold-started. */
 export function warmCaptureBridge(): void {
   void psFile(["-File", scriptPath("ps-warmup.ps1")]).catch((err) => {
-    console.warn("[PromptForge] capture warmup failed:", err);
+    console.warn("[Anvyll] capture warmup failed:", err);
   });
 }
 
@@ -534,7 +539,7 @@ function pickCaptureText(scriptText: string, earlyText: string | null): string {
   if (!fromScript) return fromEarly;
   if (!fromEarly) return fromScript;
   if (fromEarly.length > fromScript.length) {
-    console.log("[PromptForge] capture: prefer pre-hide text", fromEarly.length, "vs", fromScript.length, "chars");
+    console.log("[Anvyll] capture: prefer pre-hide text", fromEarly.length, "vs", fromScript.length, "chars");
     return fromEarly;
   }
   return fromScript;
@@ -596,7 +601,7 @@ export async function captureSelection(): Promise<CaptureResult> {
     pendingIsTerminal = false;
     pendingUiaMeta = null;
     pendingCaptureText = null;
-    console.warn("[PromptForge] capture: password field — nothing captured");
+    console.warn("[Anvyll] capture: password field ? nothing captured");
     restoreClipboardSnapshot(snapshot);
     return { text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null };
   }
@@ -607,12 +612,12 @@ export async function captureSelection(): Promise<CaptureResult> {
 
   const hwnd = lastForegroundHwnd;
   if (hwnd == null || hwnd === 0) {
-    console.warn("[PromptForge] capture: no target window tracked (click in a text field first, then press the hotkey)");
+    console.warn("[Anvyll] capture: no target window tracked (click in a text field first, then press the hotkey)");
     restoreClipboardSnapshot(snapshot);
     return { text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null };
   }
 
-  console.log("[PromptForge] capture: target hwnd", hwnd);
+  console.log("[Anvyll] capture: target hwnd", hwnd);
 
   if (pendingIsTerminal) {
     pendingIsTerminal = false;
@@ -620,7 +625,7 @@ export async function captureSelection(): Promise<CaptureResult> {
     const raw = consumeEarlyCaptureText()?.trim() ?? "";
     const resolved = finalizeCaptureText(raw);
     if (resolved.mode === "terminal" && resolved.text) {
-      console.log("[PromptForge] capture: terminal", resolved.text.length, "chars");
+      console.log("[Anvyll] capture: terminal", resolved.text.length, "chars");
       freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
       return withCaptureContext({
         text: resolved.text,
@@ -630,7 +635,7 @@ export async function captureSelection(): Promise<CaptureResult> {
         terminalContext: true,
       });
     }
-    console.warn("[PromptForge] capture: terminal with no usable input — select text or type at the prompt");
+    console.warn("[Anvyll] capture: terminal with no usable input ? select text or type at the prompt");
     restoreClipboardSnapshot(snapshot);
     return withCaptureContext({
       text: "",
@@ -646,7 +651,7 @@ export async function captureSelection(): Promise<CaptureResult> {
   if (shouldSkipDraftForSelection()) {
     pendingCaptureText = null;
     pendingUiaMeta = null;
-    console.log("[PromptForge] capture: text selection present — compose mode (no draft)");
+    console.log("[Anvyll] capture: text selection present ? compose mode (no draft)");
     return withCaptureContext({
       text: "",
       mode: "empty",
@@ -657,7 +662,7 @@ export async function captureSelection(): Promise<CaptureResult> {
   if (earlyUiaPeek != null && !(earlyTextPeek?.trim())) {
     pendingCaptureText = null;
     pendingUiaMeta = null;
-    console.log("[PromptForge] capture: empty field — compose mode");
+    console.log("[Anvyll] capture: empty field ? compose mode");
     return withCaptureContext({
       text: "",
       mode: "empty",
@@ -670,7 +675,7 @@ export async function captureSelection(): Promise<CaptureResult> {
     pendingUiaMeta = null;
     const resolved = finalizeCaptureText(earlyTextPeek!.trim());
     if (resolved.mode === "terminal" && resolved.text) {
-      console.log("[PromptForge] capture: terminal fast-path", resolved.text.length, "chars");
+      console.log("[Anvyll] capture: terminal fast-path", resolved.text.length, "chars");
       freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
       return withCaptureContext({
         text: resolved.text,
@@ -682,9 +687,9 @@ export async function captureSelection(): Promise<CaptureResult> {
     }
     if (resolved.mode === "field" && resolved.text.trim()) {
       const text = resolved.text;
-      console.log("[PromptForge] capture: fast-path", text.length, "chars");
+      console.log("[Anvyll] capture: fast-path", text.length, "chars");
       console.log(
-        "[PromptForge] capture: uia",
+        "[Anvyll] capture: uia",
         earlyUiaPeek!.className,
         "runtimeId",
         earlyUiaPeek!.runtimeId.join(","),
@@ -705,16 +710,16 @@ export async function captureSelection(): Promise<CaptureResult> {
     lastSnapshotContext.focusedIsTerminalPane,
   );
 
-  const metaPath = join(tmpdir(), `promptforge-capture-meta-${Date.now()}.json`);
+  const metaPath = join(tmpdir(), `anvyll-capture-meta-${Date.now()}.json`);
   let captured = "";
   if (!inTerminalContext) {
     try {
       captured = await captureViaScript(hwnd, metaPath);
     } catch (err) {
-      console.warn("[PromptForge] capture script failed:", err);
+      console.warn("[Anvyll] capture script failed:", err);
     }
   } else {
-    console.log("[PromptForge] capture: skipping win-capture.ps1 for terminal context");
+    console.log("[Anvyll] capture: skipping win-capture.ps1 for terminal context");
   }
   const uiaFromScript = inTerminalContext ? null : await readCaptureMeta(metaPath);
   if (!inTerminalContext) {
@@ -733,7 +738,7 @@ export async function captureSelection(): Promise<CaptureResult> {
   const resolved = finalizeCaptureText(picked.trim());
 
   if (resolved.mode === "terminal" && resolved.text) {
-    console.log("[PromptForge] capture: terminal (slow-path)", resolved.text.length, "chars");
+    console.log("[Anvyll] capture: terminal (slow-path)", resolved.text.length, "chars");
     freezeTerminalInjectTarget(hwnd, lastSnapshotContext);
     return withCaptureContext({
       text: resolved.text,
@@ -747,11 +752,11 @@ export async function captureSelection(): Promise<CaptureResult> {
   const text = pickResolvedCaptureText(resolved, picked);
 
   if (text.trim()) {
-    console.log("[PromptForge] capture: got", text.trim().length, "chars");
+    console.log("[Anvyll] capture: got", text.trim().length, "chars");
     if (uiaMeta) {
-      console.log("[PromptForge] capture: uia", uiaMeta.className, "runtimeId", uiaMeta.runtimeId.join(","));
+      console.log("[Anvyll] capture: uia", uiaMeta.className, "runtimeId", uiaMeta.runtimeId.join(","));
     } else {
-      console.warn("[PromptForge] capture: no UIA metadata (inject may fail in Chromium apps)");
+      console.warn("[Anvyll] capture: no UIA metadata (inject may fail in Chromium apps)");
     }
     freezeInjectTarget(hwnd, uiaMeta, {
       topClassName: lastSnapshotContext.className,
@@ -760,7 +765,7 @@ export async function captureSelection(): Promise<CaptureResult> {
     return withCaptureContext({ text: text.trim(), mode: "field", snapshot, uia: uiaMeta });
   }
 
-  console.warn("[PromptForge] capture: hwnd ok but no text read");
+  console.warn("[Anvyll] capture: hwnd ok but no text read");
 
   const fallbackResult = resolveCaptureResult({
     snapshotText: snapshot.text,
@@ -821,7 +826,7 @@ export async function injectText(text: string, snapshot: { text: string; hasText
   }
 
   console.log(
-    "[PromptForge] inject: window hwnd",
+    "[Anvyll] inject: window hwnd",
     target.windowHwnd,
     `host ${target.hostKind}`,
     target.uia ? `uia ${target.uia.className} rid=${target.uia.runtimeId.join(",")}` : "uia (none)",
@@ -830,8 +835,8 @@ export async function injectText(text: string, snapshot: { text: string; hasText
       : "",
   );
 
-  const tmpPath = join(tmpdir(), `promptforge-inject-${Date.now()}.txt`);
-  const metaPath = join(tmpdir(), `promptforge-inject-meta-${Date.now()}.json`);
+  const tmpPath = join(tmpdir(), `anvyll-inject-${Date.now()}.txt`);
+  const metaPath = join(tmpdir(), `anvyll-inject-meta-${Date.now()}.json`);
   let injected = false;
   try {
     await writeFile(tmpPath, normalizedText, "utf8");
@@ -848,16 +853,16 @@ export async function injectText(text: string, snapshot: { text: string; hasText
     ];
     const { stdout, code } = await psFile(args);
     for (const line of stdout.split("\n")) {
-      if (line.startsWith("PF_INJECT")) console.log("[PromptForge]", line);
+      if (line.startsWith("PF_INJECT")) console.log("[Anvyll]", line);
     }
     if (code !== 0 || !stdout.includes("PF_INJECT_OK")) {
       throw new Error(`inject not verified (exit ${code})`);
     }
     injected = true;
   } catch (err) {
-    console.warn("[PromptForge] inject script failed:", err);
+    console.warn("[Anvyll] inject script failed:", err);
     clipboard.writeText(normalizedText);
-    // Keep refined text on clipboard for manual paste — do not restore pre-capture snapshot.
+    // Keep refined text on clipboard for manual paste ? do not restore pre-capture snapshot.
     return "copied";
   } finally {
     await unlink(tmpPath).catch(() => {});

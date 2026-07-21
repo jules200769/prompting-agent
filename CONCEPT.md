@@ -1,4 +1,4 @@
-# PromptForge — Product & Architecture Concept Document
+# Anvyll — Product & Architecture Concept Document
 
 > A Windows-native AI prompt optimization studio that rewrites ordinary prompts into
 > model-specific, high-performance versions before they reach the AI — summoned by a global
@@ -16,9 +16,9 @@
 
 ## Executive Summary
 
-PromptForge is a desktop application that sits between the user and the AI model they are
+Anvyll is a desktop application that sits between the user and the AI model they are
 prompting. The user writes a normal, unstructured prompt ("Improve my SaaS landing page."),
-presses a global hotkey, and PromptForge rewrites that prompt according to the **official
+presses a global hotkey, and Anvyll rewrites that prompt according to the **official
 prompt-engineering methodology of the specific target model** (Claude Opus 4.8, GPT-5,
 Gemini 3, DeepSeek, Grok), then either injects the optimized prompt back into the original
 text box or copies it to the clipboard.
@@ -28,7 +28,7 @@ The thesis is two-fold and defensible:
 1. **Model-specific, not model-agnostic.** Every surviving competitor optimizes prompts into
    one "good" generic structure. But the published evidence is clear that prompting
    techniques are not portable: Anthropic, OpenAI, Google, DeepSeek, and xAI each publish
-   distinct, frequently updated guidance. PromptForge treats each model's optimization
+   distinct, frequently updated guidance. Anvyll treats each model's optimization
    framework as first-class, versioned, and auto-updating.
 2. **Windows-native paste-anywhere hotkey.** The competitive field is macOS- and
    Chrome-extension-first. A true system-wide Windows overlay that works in ChatGPT Desktop,
@@ -45,7 +45,7 @@ MVP, scaling, risks, and implementation plan.
 ## 1. Product Vision
 
 ### One-liner
-PromptForge turns any prompt into the best possible prompt for the model it is destined for,
+Anvyll turns any prompt into the best possible prompt for the model it is destined for,
 instantly, from anywhere on Windows.
 
 ### North Star
@@ -61,7 +61,7 @@ flowchart LR
         A["Surviving competitors: model-agnostic optimization"]
         B["Surviving competitors: macOS + Chrome first"]
     end
-    subgraph forge[PromptForge Defensible Wedge]
+    subgraph forge[Anvyll Defensible Wedge]
         C[Model-specific engines per provider]
         D[Windows-native global hotkey overlay]
     end
@@ -72,7 +72,7 @@ flowchart LR
 - **Axis 1 — Model specificity.** A Claude Opus 4.8 prompt, a GPT-5 prompt, and a Gemini 3
   prompt are not interchangeable. Each provider publishes and iterates its own framework
   ([8 Best Prompt Engineering Tools in 2026](https://orq.ai/blog/prompt-engineering-tools)).
-  PromptForge maintains a versioned optimization engine per model and updates it as guidance
+  Anvyll maintains a versioned optimization engine per model and updates it as guidance
   evolves.
 - **Axis 2 — Frictionless Windows capture.** No copy-paste round-trip to a web dashboard.
   A hotkey fires a floating overlay over whatever app has focus, captures the active text,
@@ -87,7 +87,7 @@ flowchart LR
 3. **Teams & agencies** — shared prompt libraries, consistent quality, brand/persona memory.
 
 ### Non-goals (explicit)
-- Not an LLM provider. PromptForge does not answer the prompt; it only shapes it.
+- Not an LLM provider. Anvyll does not answer the prompt; it only shapes it.
 - Not a generic chat UI. The Studio is a prompt workbench, not a chat surface.
 - Not model-agnostic. We will not collapse all engines into one "good enough" template.
 
@@ -135,7 +135,7 @@ flowchart LR
 ## 3. Competitive Analysis
 
 The field splits into three camps. No incumbent combines **model-specific engines** with a
-**Windows-native system-wide hotkey**. That intersection is PromptForge's lane.
+**Windows-native system-wide hotkey**. That intersection is Anvyll's lane.
 
 ### Camp A — Direct prompt enhancers (closest substitutes)
 
@@ -176,14 +176,14 @@ The field splits into three camps. No incumbent combines **model-specific engine
 ### Competitive gap matrix (textual)
 
 - **Model-specific engines:** PromptAI no · PromptItIn partial (one framework) · FlashPrompt
-  no · AIPRM no · Prompt Optimizer no · orq.ai n/a · **PromptForge YES.**
+  no · AIPRM no · Prompt Optimizer no · orq.ai n/a · **Anvyll YES.**
 - **Windows-native system-wide hotkey:** PromptAI macOS-only · PromptItIn web/paste ·
-  FlashPrompt extension · AIPRM extension · Prompt Optimizer desktop but generic · **PromptForge YES.**
+  FlashPrompt extension · AIPRM extension · Prompt Optimizer desktop but generic · **Anvyll YES.**
 - **Auto-updating optimization frameworks (AI Research Mode):** all competitors manual/stale ·
-  **PromptForge YES (reviewed).**
+  **Anvyll YES (reviewed).**
 - **Quality score + diff comparison view:** PromptItIn has scoring; others minimal ·
-  **PromptForge YES (full diff + rubric).**
-- **Persona/context memory:** PromptItIn yes; others minimal · **PromptForge YES.**
+  **Anvyll YES (full diff + rubric).**
+- **Persona/context memory:** PromptItIn yes; others minimal · **Anvyll YES.**
 
 ### Differentiation risk
 The differentiation is real but not patentable. The moat is **execution speed on the
@@ -426,7 +426,7 @@ count. The **measured** guide-structure adherence of the result is computed loca
 
 | Concern | Where | Detail |
 |---|---|---|
-| Settings, library, history, opt cache | `promptforge.store.json` in Electron `userData` | Single JSON file via `src/main/storage.ts` (`readFileSync`/`writeFileSync`). Chosen to avoid native-ABI rebuilds. |
+| Settings, library, history, opt cache | `anvyll.store.json` in Electron `userData` | Single JSON file via `src/main/storage.ts` (`readFileSync`/`writeFileSync`). Chosen to avoid native-ABI rebuilds. |
 | OpenAI API key | Windows Credential Manager | Encrypted, via `keyStore`. Settings store only a presence flag. |
 | Prompting guides | `prompting-guides/*.md` (bundled) | Read-only at runtime by `guideLoader.ts`. |
 | Pack metadata | `src/engine/packs.ts` (bundled) | Compiled into the app, not a DB row. |

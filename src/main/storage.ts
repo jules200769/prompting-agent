@@ -4,8 +4,8 @@
 // document is reliable and avoids the Electron native-ABI rebuild problem.
 
 import { app } from "electron";
-import { join } from "node:path";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { copyFileSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import type {
   AppSettings,
   HistoryAddCommentRequest,
@@ -23,6 +23,7 @@ import type {
   SubScores,
 } from "../shared/types";
 import { DEFAULT_SETTINGS } from "../shared/types";
+import { normalizeTheme } from "../shared/themes";
 import {
   assignProjectColor,
   clampContextText,
@@ -101,11 +102,41 @@ const EMPTY: StoreShape = {
 let data: StoreShape | null = null;
 
 function filePath(): string {
-  return join(app.getPath("userData"), "promptforge.store.json");
+  return join(app.getPath("userData"), "anvyll.store.json");
+}
+
+/** Pre-rebrand store locations (PromptForge / older package names). */
+function legacyStorePaths(): string[] {
+  const userData = app.getPath("userData");
+  const roaming = dirname(userData);
+  return [
+    join(userData, "promptforge.store.json"),
+    join(roaming, "promptforge", "promptforge.store.json"),
+    join(roaming, "PromptForge", "promptforge.store.json"),
+    join(roaming, "anvyl", "promptforge.store.json"),
+    join(roaming, "anvyl", "anvyl.store.json"),
+  ];
+}
+
+function migrateLegacyStoreIfNeeded(): void {
+  const dest = filePath();
+  if (existsSync(dest)) return;
+  for (const legacy of legacyStorePaths()) {
+    if (!existsSync(legacy)) continue;
+    try {
+      const dir = dirname(dest);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      copyFileSync(legacy, dest);
+      return;
+    } catch {
+      // Fall through to empty store if copy fails.
+    }
+  }
 }
 
 function load(): StoreShape {
   if (data) return data;
+  migrateLegacyStoreIfNeeded();
   const p = filePath();
   if (!existsSync(p)) {
     data = structuredClone(EMPTY);
@@ -321,7 +352,7 @@ function evictOldestCache(d: StoreShape): void {
 export function getSettings(): AppSettings {
   const s = load().settings;
   if (!s) return { ...DEFAULT_SETTINGS };
-  return { ...DEFAULT_SETTINGS, ...s };
+  return { ...DEFAULT_SETTINGS, ...s, theme: normalizeTheme(s.theme) };
 }
 
 export function setSettings(s: AppSettings): void {
