@@ -14,11 +14,13 @@ import { useTypewriterReveal } from "../hooks/useTypewriterReveal";
 import type { CaptureContext, CaptureMode, ModelId, OptimizeGrounding, OptLevel, OverlayPlacement, PromptType } from "../../shared/types";
 import { MODELS, LEVEL_LABELS, LEVEL_COLORS } from "../../shared/types";
 import { toTerminalSingleLine, stripTerminalStreamChunk } from "../../shared/terminalOutput";
+import { overlayCompletionAction, overlayFooterActions } from "../../shared/overlayActions";
 import {
   type ContextImportScope,
   contextImportPromptFor,
 } from "../../shared/contextImportPrompt";
-import { NEW_SESSION_TITLE, SESSION_CONTEXT_MAX_CHARS, type ProjectContext, type SessionContext } from "../../shared/session";
+import { NEW_SESSION_TITLE, SESSION_CONTEXT_MAX_CHARS, clampContextPaste, needsContextCompact, type ProjectContext, type SessionContext } from "../../shared/session";
+import { isRecentSessionMemoryUpdate } from "../../shared/standingNotes";
 import { OverlayPlacementPicker } from "../components/OverlayPlacementPicker";
 import { ModelPicker } from "../components/ModelPicker";
 import { WritingTypePicker, type WritingType, writingLevelLabels } from "../components/WritingTypePicker";
@@ -27,6 +29,28 @@ import { applyThemeToDocument } from "../../shared/themes";
 
 type Phase = "idle" | "capturing" | "optimizing" | "done" | "error";
 type CaptureGlow = "off" | "active";
+
+function ContextCompactSpinner() {
+  return (
+    <span className="context-compact-spinner" aria-hidden>
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
+function contextCompactStatusLabel(scope: ContextImportScope): string {
+  return scope === "project" ? "Compacting into project memory…" : "Compacting into session memory…";
+}
+
+function contextCompactAddLabel(scope: ContextImportScope): string {
+  return scope === "project" ? "Compact and add to project" : "Compact and add to session";
+}
+
+function contextCompactHintSuffix(scope: ContextImportScope): string {
+  return scope === "project" ? "compact before adding to project" : "compact before adding to session";
+}
 
 function MenuLinesIcon() {
   return (
@@ -265,7 +289,11 @@ function contextStatusPlaceholder(
     ? `Session: on — ${activeSession!.title}`
     : "Session: off";
   const projectPart = projectOn ? "Project: on" : "Project: off";
-  return `${sessionPart} · ${projectPart}`;
+  const base = `${sessionPart} · ${projectPart}`;
+  if (isRecentSessionMemoryUpdate(activeSession?.memoryUpdatedAt)) {
+    return `${base} · Session memory updated`;
+  }
+  return base;
 }
 
 function GlassPill({
@@ -378,6 +406,8 @@ export function Overlay() {
   const [shellVisible, setShellVisible] = useState(false);
   const [applyNotice, setApplyNotice] = useState<string | null>(null);
   const [terminalContext, setTerminalContext] = useState(false);
+  const [cursorTerminalContext, setCursorTerminalContext] = useState(false);
+  const [canInject, setCanInject] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   /** True when "Bring context" was opened from "+ New Project" (project scope locked). */
@@ -392,6 +422,8 @@ export function Overlay() {
   const [standingProjectContext, setStandingProjectContext] = useState("");
   const [importPromptCopied, setImportPromptCopied] = useState(false);
   const [contextSaved, setContextSaved] = useState(false);
+  const [contextCompacting, setContextCompacting] = useState(false);
+  const [contextCompactError, setContextCompactError] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<SessionContext | null>(null);
   const [sessions, setSessions] = useState<SessionContext[]>([]);
   /** Full project library snapshot — drives the context bar, panel, and session-row accents. */
@@ -402,7 +434,9 @@ export function Overlay() {
     mode: CaptureMode;
     snapshot: { text: string; hasText: boolean };
     terminalContext?: boolean;
+    cursorTerminalContext?: boolean;
     context?: CaptureContext;
+    canInject?: boolean;
   } | null>(null);
   const defaultModelRef = useRef<ModelId>("claude-opus-4.8");
   const shellRef = useRef<HTMLDivElement>(null);
@@ -415,7 +449,7 @@ export function Overlay() {
   const keyStateRef = useRef({
     mode,
     phase,
-    captureFailed: false,
+    copyOnly: false,
     panelOpen: false,
     modalOpen: false,
     newProjectFlow: false,
@@ -463,7 +497,7 @@ export function Overlay() {
   keyStateRef.current = {
     mode,
     phase,
-    captureFailed: mode === "empty",
+    copyOnly: overlayCompletionAction(cursorTerminalContext, canInject) === "copy",
     panelOpen: contextPanelOpen,
     modalOpen: contextModalOpen,
     newProjectFlow,
@@ -503,6 +537,8 @@ export function Overlay() {
     resumeContextModalRef.current = false;
     setNewProjectFlow(false);
     setImportTargetProjectId(null);
+    setContextCompactError(null);
+    setContextCompacting(false);
     setContextModalOpen(false);
     if (returnToPanel) {
       setPendingDeleteProject(null);
@@ -529,6 +565,8 @@ export function Overlay() {
       setMenuOpen(false);
       setApplyNotice(null);
       setTerminalContext(false);
+      setCursorTerminalContext(false);
+      setCanInject(false);
       setPromptType("auto");
       setSegmentMode("prompting");
       setWritingType("question");
@@ -564,7 +602,9 @@ export function Overlay() {
       mode: CaptureMode;
       snapshot: { text: string; hasText: boolean };
       terminalContext?: boolean;
+      cursorTerminalContext?: boolean;
       context?: CaptureContext;
+      canInject?: boolean;
       clipboardSummary?: { scope: ContextImportScope; text: string };
     }) => {
       // The first empty OVERLAY_SHOW is the instant shell displayed while native
@@ -588,13 +628,17 @@ export function Overlay() {
           mode: detail.mode,
           snapshot: detail.snapshot ?? { text: "", hasText: false },
           terminalContext: detail.terminalContext,
+          cursorTerminalContext: detail.cursorTerminalContext,
           context: detail.context,
+          canInject: detail.canInject ?? false,
         };
         // Destination-aware model preselect: suggestion wins for this session,
         // manual pick afterwards wins for the run; defaultModel is never written.
         setModel(detail.context?.suggestedModel ?? defaultModelRef.current);
         setMode(detail.mode);
         setTerminalContext(Boolean(detail.terminalContext));
+        setCursorTerminalContext(Boolean(detail.cursorTerminalContext));
+        setCanInject(detail.canInject ?? false);
         setPromptType("auto");
         setSegmentMode("prompting");
         setWritingType("question");
@@ -623,6 +667,8 @@ export function Overlay() {
       captureRef.current = null;
       setMode("field");
       setTerminalContext(false);
+      setCursorTerminalContext(false);
+      setCanInject(false);
       setPromptType("auto");
       setSegmentMode("prompting");
       setWritingType("question");
@@ -646,6 +692,18 @@ export function Overlay() {
       offShow?.();
       offClear?.();
     };
+  }, []);
+
+  useEffect(() => {
+    const off = api.onSessionMemoryUpdated?.((session) => {
+      setActiveSession((current) => {
+        if (current?.id !== session.id) return current;
+        setImportedSessionContext(session.contextText);
+        return session;
+      });
+      setSessions((prev) => prev.map((s) => (s.id === session.id ? session : s)));
+    });
+    return () => off?.();
   }, []);
 
   useEffect(() => {
@@ -730,6 +788,8 @@ export function Overlay() {
     setPendingDeleteProject(null);
     setImportPromptCopied(false);
     setContextSaved(false);
+    setContextCompactError(null);
+    setContextCompacting(false);
     setContextImportScope("project");
     setImportTargetProjectId(null);
     setImportedProjectContext("");
@@ -743,6 +803,8 @@ export function Overlay() {
     setPendingDeleteProject(null);
     setImportPromptCopied(false);
     setContextSaved(false);
+    setContextCompactError(null);
+    setContextCompacting(false);
     setContextImportScope("session");
     setImportTargetProjectId(null);
     setNewProjectFlow(false);
@@ -756,6 +818,8 @@ export function Overlay() {
     setPendingDeleteProject(null);
     setImportPromptCopied(false);
     setContextSaved(false);
+    setContextCompactError(null);
+    setContextCompacting(false);
     setContextImportScope("project");
     setImportTargetProjectId(project.id);
     setNewProjectFlow(false);
@@ -798,18 +862,16 @@ export function Overlay() {
     refreshContextSnapshot();
   }
 
-  async function onAddToContext() {
+  async function saveContextText(text: string) {
     if (contextImportScope === "project") {
       if (importTargetProjectId && importTargetProjectId !== activeProjectId) {
-        // Editing a non-active project's memory — never touch the active pointer.
-        const updated = await api.projectSetContextById(importTargetProjectId, importedProjectContext);
+        const updated = await api.projectSetContextById(importTargetProjectId, text);
         if (updated) setImportedProjectContext(updated.contextText);
       } else {
-        // Clear active first so upsert creates a fresh library entry (not an overwrite).
         if (newProjectFlow) {
           await api.projectSetActive(null);
         }
-        const project = await api.projectUpsertActive(importedProjectContext);
+        const project = await api.projectUpsertActive(text);
         setStandingProjectContext(project.contextText);
         setImportedProjectContext(project.contextText);
         if (newProjectFlow) {
@@ -819,7 +881,7 @@ export function Overlay() {
       }
     } else {
       const target = activeSession ?? (await api.sessionCreate());
-      setActiveSession(await api.sessionSetContext(target.id, importedSessionContext));
+      setActiveSession(await api.sessionSetContext(target.id, text));
     }
     refreshContextSnapshot();
     setContextSaved(true);
@@ -829,35 +891,97 @@ export function Overlay() {
     }, 900);
   }
 
-  async function onConfirmClipboardSummary() {
-    if (!clipboardSummary) return;
-    const { scope, text } = clipboardSummary;
-    if (scope === "session") {
-      const target = activeSession ?? (await api.sessionCreate());
-      setActiveSession(await api.sessionSetContext(target.id, text));
-    } else {
-      const project = await api.projectUpsertActive(text);
-      setStandingProjectContext(project.contextText);
+  async function compactContextIfNeeded(scope: ContextImportScope, raw: string): Promise<string> {
+    if (!needsContextCompact(raw)) return raw;
+    const result = await api.contextCompact({ scope, text: raw });
+    return result.text;
+  }
+
+  async function onAddToContext() {
+    const raw =
+      contextImportScope === "project" ? importedProjectContext : importedSessionContext;
+    if (!raw.trim() || contextCompacting) return;
+
+    setContextCompactError(null);
+
+    let text = raw;
+    if (needsContextCompact(raw)) {
+      setContextCompacting(true);
+      try {
+        text = await compactContextIfNeeded(contextImportScope, raw);
+        if (contextImportScope === "project") {
+          setImportedProjectContext(text);
+        } else {
+          setImportedSessionContext(text);
+        }
+      } catch (err: unknown) {
+        setContextCompactError(err instanceof Error ? err.message : String(err));
+        return;
+      } finally {
+        setContextCompacting(false);
+      }
     }
-    refreshContextSnapshot();
-    resumeContextModalRef.current = false;
-    setClipboardSummaryAdded(true);
-    window.setTimeout(() => {
-      setClipboardSummaryAdded(false);
-      setClipboardSummary(null);
-    }, 900);
+
+    await saveContextText(text);
+  }
+
+  async function onConfirmClipboardSummary() {
+    if (!clipboardSummary || contextCompacting || clipboardSummaryAdded) return;
+    const { scope, text: raw } = clipboardSummary;
+
+    setContextCompactError(null);
+    setContextCompacting(true);
+    try {
+      const text = await compactContextIfNeeded(scope, raw);
+      if (scope === "session") {
+        const target = activeSession ?? (await api.sessionCreate());
+        setActiveSession(await api.sessionSetContext(target.id, text));
+      } else {
+        const project = await api.projectUpsertActive(text);
+        setStandingProjectContext(project.contextText);
+        setImportedProjectContext(project.contextText);
+      }
+      refreshContextSnapshot();
+      resumeContextModalRef.current = false;
+      setClipboardSummaryAdded(true);
+      window.setTimeout(() => {
+        setClipboardSummaryAdded(false);
+        setClipboardSummary(null);
+      }, 900);
+    } catch (err: unknown) {
+      setContextCompactError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setContextCompacting(false);
+    }
   }
 
   function onDismissClipboardSummary() {
     if (clipboardSummary) lastDismissedSummaryRef.current = clipboardSummary.text;
     resumeContextModalRef.current = false;
+    setContextCompactError(null);
     setClipboardSummary(null);
+  }
+
+  async function onPromoteSessionToProject(sessionId: string) {
+    try {
+      await api.projectPromoteFromSession(sessionId);
+      refreshContextSnapshot();
+    } catch (err: unknown) {
+      console.warn("[Anvyll] promote session to project failed:", err);
+    }
   }
 
   async function runOptimize() {
     if (!prompt.trim()) return;
-    const sessionIdForTitle = activeSession?.id;
-    const shouldTitleFromPrompt = activeSession?.title === NEW_SESSION_TITLE;
+    let sessionForTitle = activeSession;
+    if (!sessionForTitle) {
+      const ensured = await api.sessionEnsureActive(activeProjectId);
+      sessionForTitle = ensured;
+      setActiveSession(ensured);
+      setSessions((prev) => [ensured, ...prev.filter((s) => s.id !== ensured.id)]);
+    }
+    const sessionIdForTitle = sessionForTitle.id;
+    const shouldTitleFromPrompt = sessionForTitle.title === NEW_SESSION_TITLE;
     setApplyNotice(null);
     resetTypewriter();
     setPhase("optimizing");
@@ -904,6 +1028,7 @@ export function Overlay() {
 
   async function onApply() {
     if (!outputText.trim() || phase !== "done") return;
+    if (cursorTerminalContext || !canInject) return;
     setApplyNotice(null);
     const text = isTerminalSession ? toTerminalSingleLine(outputText) : outputText;
     void api.historyFinalize({ id: lastRunIdRef.current ?? undefined, finalPrompt: text, action: "apply" });
@@ -943,7 +1068,7 @@ export function Overlay() {
       const {
         mode: m,
         phase: p,
-        captureFailed: failed,
+        copyOnly,
         panelOpen,
         modalOpen,
         newProjectFlow: modalFromNewProject,
@@ -976,8 +1101,8 @@ export function Overlay() {
         if (inEditable) return;
         e.preventDefault();
         if (p === "idle" || p === "error") actionsRef.current.runOptimize();
-        // Compose mode (m === "empty") has no frozen inject target — Enter copies instead.
-        else if (p === "done") (failed ? actionsRef.current.onCopy : actionsRef.current.onApply)();
+        // Copy-only when no inject target or Cursor terminal; otherwise Apply.
+        else if (p === "done") (copyOnly ? actionsRef.current.onCopy : actionsRef.current.onApply)();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -1002,10 +1127,14 @@ export function Overlay() {
             ? projects.find((p) => p.id === importTargetProjectId)?.title
             : activeProject?.title) ?? "Project";
 
+  const activeImportText =
+    contextImportScope === "project" ? importedProjectContext : importedSessionContext;
+  const importCharCount = activeImportText.trim().length;
+  const importNeedsCompact = needsContextCompact(activeImportText);
+
   const busy = phase === "optimizing" || isRevealing;
   const capturing = phase === "capturing";
   const captureGlowOn = captureGlow === "active";
-  const captureFailed = mode === "empty";
 
   useEffect(() => {
     setCaptureGlow(capturing ? "active" : "off");
@@ -1014,8 +1143,9 @@ export function Overlay() {
   const showOutput = busy || phase === "done" || phase === "error";
   const outputValue = busy ? displayed : outputText;
   const canCopy = !!outputText.trim() && phase === "done";
-  // Compose mode has no frozen inject target — Copy is the terminal action, Apply stays off.
-  const canApply = canCopy && !captureFailed;
+  const copyOnlyFooter = overlayCompletionAction(cursorTerminalContext, canInject) === "copy";
+  const footerActions = overlayFooterActions(cursorTerminalContext, canInject);
+  const canApply = canCopy && canInject && !cursorTerminalContext;
   const modelLabel = MODELS.find((m) => m.id === model)?.label ?? model;
   const controlsDisabled = capturing || busy;
 
@@ -1073,6 +1203,8 @@ export function Overlay() {
             onNewProject={onNewProject}
             onBringContext={onBringContext}
             onEditProjectMemory={onEditProjectMemory}
+            standingProjectContext={standingProjectContext}
+            onPromoteSessionToProject={(id) => void onPromoteSessionToProject(id)}
             onClose={() => setContextPanelOpen(false)}
           />
         )}
@@ -1187,11 +1319,13 @@ export function Overlay() {
                 >
                   Discard
                 </button>
-                <GlassPill accent onClick={onApply} disabled={!canApply}>
-                  Apply
-                </GlassPill>
+                {footerActions.includes("apply") && (
+                  <GlassPill accent onClick={onApply} disabled={!canApply}>
+                    Apply
+                  </GlassPill>
+                )}
                 <div ref={copyAnchorRef} className="relative shrink-0">
-                  <GlassPill onClick={() => void onCopy()} disabled={!canCopy}>
+                  <GlassPill accent={copyOnlyFooter} onClick={() => void onCopy()} disabled={!canCopy}>
                     Copy
                   </GlassPill>
                 </div>
@@ -1307,32 +1441,51 @@ export function Overlay() {
 
         {clipboardSummary && (
           <div
-            className="absolute left-1/2 -translate-x-1/2 -bottom-12 z-30 apple-glass-menu rounded-full flex items-center gap-2 pl-4 pr-2 py-1.5 text-[13px] text-white whitespace-nowrap"
+            className="absolute left-1/2 -translate-x-1/2 -bottom-12 z-30 flex flex-col items-center gap-1.5"
             role="status"
           >
-            <span className="text-white/70">Summary found on clipboard</span>
-            <button
-              type="button"
-              onClick={() => void onConfirmClipboardSummary()}
-              disabled={clipboardSummaryAdded}
-              className="rounded-full px-3 py-1 text-[12px] font-medium bg-white/20 hover:bg-white/30 text-white transition disabled:opacity-100"
-            >
-              {clipboardSummaryAdded
-                ? "Added ✓"
-                : clipboardSummary.scope === "project"
-                  ? "Add to project memory"
-                  : "Add to this session"}
-            </button>
-            <button
-              type="button"
-              onClick={onDismissClipboardSummary}
-              className="shrink-0 p-1 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition"
-              aria-label="Dismiss"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
-              </svg>
-            </button>
+            <div className="apple-glass-menu rounded-full flex items-center gap-2 pl-4 pr-2 py-1.5 text-[13px] text-white whitespace-nowrap">
+              <span className="text-white/70">Summary found on clipboard</span>
+              <button
+                type="button"
+                onClick={() => void onConfirmClipboardSummary()}
+                disabled={clipboardSummaryAdded || contextCompacting}
+                className="rounded-full px-3 py-1 text-[12px] font-medium bg-white/20 hover:bg-white/30 text-white transition disabled:opacity-60"
+              >
+                {contextCompacting ? (
+                  <span className="context-compact-btn-spinner">
+                    <ContextCompactSpinner />
+                    Compacting…
+                  </span>
+                ) : clipboardSummaryAdded ? (
+                  "Added ✓"
+                ) : needsContextCompact(clipboardSummary.text) ? (
+                  clipboardSummary.scope === "project"
+                    ? "Compact and add to project"
+                    : "Compact and add to session"
+                ) : clipboardSummary.scope === "project" ? (
+                  "Add to project memory"
+                ) : (
+                  "Add to this session"
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={onDismissClipboardSummary}
+                disabled={contextCompacting}
+                className="shrink-0 p-1 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition disabled:opacity-40"
+                aria-label="Dismiss"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            {contextCompactError && (
+              <p className="text-[11px] text-red-400 max-w-[min(92vw,420px)] text-center px-2">
+                {contextCompactError}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -1402,19 +1555,39 @@ export function Overlay() {
                       : "Paste the answer below — it becomes this session's memory"}
                   </span>
                 </div>
-                <div className="mx-3">
+                <div
+                  className={`mx-3 context-compact-field${contextCompacting ? " context-compact-field--busy" : ""}`}
+                >
                   <textarea
                     value={
                       contextImportScope === "project" ? importedProjectContext : importedSessionContext
                     }
                     onChange={(e) => {
-                      if (contextImportScope === "project") setImportedProjectContext(e.target.value);
-                      else setImportedSessionContext(e.target.value);
+                      setContextCompactError(null);
+                      const next = clampContextPaste(e.target.value);
+                      if (contextImportScope === "project") setImportedProjectContext(next);
+                      else setImportedSessionContext(next);
                     }}
+                    readOnly={contextCompacting}
                     placeholder="Paste your context details here"
-                    maxLength={SESSION_CONTEXT_MAX_CHARS}
-                    className="w-full h-[88px] rounded-xl bg-black/25 border border-white/10 px-3.5 py-3 text-[13px] leading-relaxed text-white placeholder:text-white/40 resize-none focus:outline-none scroll-thin"
+                    className="context-compact-textarea w-full h-[88px] rounded-xl bg-black/25 border border-white/10 px-3.5 py-3 text-[13px] leading-relaxed text-white placeholder:text-white/40 resize-none focus:outline-none scroll-thin"
                   />
+                  {contextCompacting && (
+                    <div className="context-compact-overlay" aria-live="polite">
+                      <ContextCompactSpinner />
+                      <span className="context-compact-overlay__label">
+                        {contextCompactStatusLabel(contextImportScope)}
+                      </span>
+                    </div>
+                  )}
+                  <p className="mt-1.5 text-[11px] text-white/45 tabular-nums">
+                    {importNeedsCompact
+                      ? `${importCharCount.toLocaleString()} chars · ${contextCompactHintSuffix(contextImportScope)}`
+                      : `${importCharCount.toLocaleString()} / ${SESSION_CONTEXT_MAX_CHARS}`}
+                  </p>
+                  {contextCompactError && (
+                    <p className="mt-1 text-[12px] text-red-400">{contextCompactError}</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1439,10 +1612,24 @@ export function Overlay() {
               </button>
               <button
                 type="button"
+                disabled={contextCompacting || !activeImportText.trim() || contextSaved}
                 onClick={() => void onAddToContext()}
-                className="rounded-xl px-3.5 py-2 text-[13px] bg-white/15 hover:bg-white/25 transition"
+                className="rounded-xl px-3.5 py-2 text-[13px] bg-white/15 hover:bg-white/25 transition disabled:opacity-40 disabled:pointer-events-none"
               >
-                {contextSaved ? "Added" : "Add to context"}
+                {contextCompacting ? (
+                  <span className="context-compact-btn-spinner">
+                    <ContextCompactSpinner />
+                    Compacting…
+                  </span>
+                ) : contextSaved ? (
+                  "Added"
+                ) : importNeedsCompact ? (
+                  contextCompactAddLabel(contextImportScope)
+                ) : contextImportScope === "project" ? (
+                  "Add to project memory"
+                ) : (
+                  "Add to context"
+                )}
               </button>
             </div>
           </div>

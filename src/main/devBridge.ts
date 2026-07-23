@@ -2,8 +2,9 @@
 // call the same optimize/settings path as Electron IPC (no capture/inject).
 
 import { createServer, type IncomingMessage } from "node:http";
-import type { OptimizeRequest, OptimizeWithRunId } from "../shared/types";
+import type { OptimizeRequest, OptimizeWithRunId, ContextCompactRequest } from "../shared/types";
 import { runOptimize } from "./optimizeHandler";
+import { runContextCompact } from "./contextCompactHandler";
 import * as store from "./storage";
 
 const DEV_BRIDGE_PORT = Number(process.env.ANVYLL_DEV_BRIDGE_PORT ?? 5174);
@@ -70,6 +71,25 @@ export function startDevBridge(): void {
         }, "dev");
         writeNdjson(res, { type: "done", data: result });
         res.end();
+        return;
+      }
+
+      if (method === "POST" && url === "/api/context-compact") {
+        let body: ContextCompactRequest;
+        try {
+          body = JSON.parse(await readBody(req)) as ContextCompactRequest;
+        } catch {
+          sendJson(res, 400, { error: "Invalid JSON body" });
+          return;
+        }
+
+        try {
+          const result = await runContextCompact(body);
+          sendJson(res, 200, result);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          sendJson(res, 500, { error: msg });
+        }
         return;
       }
 

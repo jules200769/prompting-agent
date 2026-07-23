@@ -1,6 +1,6 @@
 // Browser preview client for the Electron dev bridge (Vite proxies /api → 5174).
 
-import type { AppSettings, OptimizeRequest, OptimizeResult } from "../shared/types";
+import type { AppSettings, ContextCompactRequest, ContextCompactResult, OptimizeRequest, OptimizeResult } from "../shared/types";
 
 type NdjsonLine =
   | { type: "chunk"; data: string }
@@ -67,4 +67,23 @@ export async function devBridgeSettingsGet(): Promise<AppSettings> {
     throw new Error(`Settings fetch failed (${res.status})`);
   }
   return res.json() as Promise<AppSettings>;
+}
+
+export async function devBridgeContextCompact(req: ContextCompactRequest): Promise<ContextCompactResult> {
+  const res = await fetch("/api/context-compact", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const err = (await res.json()) as { error?: string };
+      if (err.error) detail = err.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail || `Context compact failed (${res.status})`);
+  }
+  return res.json() as Promise<ContextCompactResult>;
 }

@@ -223,6 +223,16 @@ export interface OptimizeRequest {
   projectContext?: string;
 }
 
+/** Request to compact a long Import-context paste into standing session/project memory. */
+export interface ContextCompactRequest {
+  scope: "session" | "project";
+  text: string;
+}
+
+export interface ContextCompactResult {
+  text: string;
+}
+
 export interface LibraryItem {
   id: string;
   title: string;
@@ -299,6 +309,8 @@ export interface RunRecord {
   schemaVersion: 1;
   createdAt: number;
   surface: RunSurface;
+  /** Active session at optimize time; used for auto-memory refresh after Apply/Copy. */
+  sessionId?: string;
   /** True when the optimize result came from the persisted opt cache. */
   fromCache?: boolean;
   input: RunRecordInput;
@@ -384,6 +396,8 @@ export interface AppSettings {
   screenContext: boolean;
   /** Adapt rewrite tone to the destination app category; requires screenContext. */
   styleMatching: boolean;
+  /** After Apply/Copy, refresh active session standing context from recent runs. */
+  autoSessionMemory: boolean;
   /** Per-category tone override; unset entries fall back to "auto". */
   styleByCategory: Partial<Record<AppCategory, CategoryStylePreset>>;
 }
@@ -402,6 +416,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   onboardingDone: false,
   screenContext: true,
   styleMatching: true,
+  autoSessionMemory: true,
   styleByCategory: {},
 };
 
@@ -471,6 +486,8 @@ export const IPC = {
   SESSION_SET_ACTIVE: "anvyll:session:set-active",
   SESSION_GET_ACTIVE: "anvyll:session:get-active",
   SESSION_MAYBE_TITLE_FROM_PROMPT: "anvyll:session:maybe-title-from-prompt",
+  SESSION_ENSURE_ACTIVE: "anvyll:session:ensure-active",
+  SESSION_MEMORY_UPDATED: "anvyll:session:memory-updated",
   PROJECT_CONTEXT_GET: "anvyll:project-context:get",
   PROJECT_CONTEXT_SET: "anvyll:project-context:set",
   PROJECT_LIST: "anvyll:project:list",
@@ -478,6 +495,8 @@ export const IPC = {
   PROJECT_SET_CONTEXT_BY_ID: "anvyll:project:set-context-by-id",
   PROJECT_SET_ACTIVE: "anvyll:project:set-active",
   PROJECT_DELETE: "anvyll:project:delete",
+  PROJECT_PROMOTE_FROM_SESSION: "anvyll:project:promote-from-session",
+  CONTEXT_COMPACT: "anvyll:context:compact",
   OVERLAY_SHOW: "anvyll:overlay:show",
   OVERLAY_CAPTURE_PENDING: "anvyll:overlay:capture-pending",
   OVERLAY_PREPARED: "anvyll:overlay:prepared",

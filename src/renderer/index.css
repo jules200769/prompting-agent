@@ -1,5 +1,6 @@
 @import "./assets/fonts/fonts.css";
 @import "./themes.css";
+@import "./studio.css";
 
 @tailwind base;
 @tailwind components;
@@ -166,6 +167,117 @@ body {
     box-shadow:
       0 0 4px rgba(var(--glow-rgb), 0.32),
       0 0 1px rgba(var(--glow-soft-rgb), 0.65);
+  }
+}
+
+/* Import-context compact — spectral border on the paste field + overlay shimmer. */
+.context-compact-field {
+  position: relative;
+}
+
+.context-compact-field--busy .context-compact-textarea {
+  border-color: transparent;
+  color: rgba(255, 255, 255, 0.35);
+  background:
+    linear-gradient(145deg, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0.24) 100%) padding-box,
+    linear-gradient(
+      110deg,
+      rgba(var(--glow-soft-rgb), 0.95),
+      rgba(var(--glow-cyan-rgb), 0.9),
+      rgba(255, 255, 255, 0.75),
+      rgba(var(--glow-rgb), 0.95),
+      rgba(var(--glow-soft-rgb), 0.95)
+    ) border-box;
+  background-size: 100% 100%, 260% 260%;
+  animation: context-compact-border 1.6s ease-in-out infinite;
+  will-change: background-position;
+}
+
+.context-compact-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.context-compact-overlay__label {
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.82);
+  text-align: center;
+  padding: 0 12px;
+}
+
+.context-compact-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.context-compact-spinner span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(var(--glow-cyan-rgb), 0.95);
+  box-shadow: 0 0 6px rgba(var(--glow-cyan-rgb), 0.55);
+  animation: context-compact-dot 1.1s ease-in-out infinite;
+}
+
+.context-compact-spinner span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.context-compact-spinner span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.context-compact-btn-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@keyframes context-compact-border {
+  0%,
+  100% {
+    background-position: 0 0, 0% 50%;
+  }
+  50% {
+    background-position: 0 0, 100% 50%;
+  }
+}
+
+@keyframes context-compact-dot {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-compact-field--busy .context-compact-textarea {
+    animation: none;
+    background-position: 0 0, 50% 50%;
+    will-change: auto;
+  }
+
+  .context-compact-spinner span {
+    animation: none;
+    opacity: 0.85;
   }
 }
 

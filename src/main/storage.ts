@@ -65,6 +65,8 @@ interface FileMemoryEntry {
   name: string;
   lastSeen: number;
   hits: number;
+  /** null/undefined = legacy unscoped bucket visible to all projects. */
+  projectId?: string | null;
 }
 
 interface StoreShape {
@@ -155,6 +157,7 @@ function load(): StoreShape {
         ? parsed.sessions.map((s) => ({
             ...s,
             projectId: s.projectId ?? null,
+            memoryUpdatedAt: s.memoryUpdatedAt ?? null,
           }))
         : [],
       history: migrateHistoryArray(parsed.history),
@@ -437,6 +440,7 @@ export function addRunRecord(
     schemaVersion: 1,
     createdAt: Date.now(),
     surface,
+    sessionId: d.activeSessionId ?? undefined,
     fromCache: fromCache || undefined,
     input: buildRunInput(req),
     output: buildRunOutput(result),
@@ -502,6 +506,17 @@ export function listSessions(): SessionContext[] {
   return [...load().sessions].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** Returns the active session, creating one linked to projectId (or active project) when absent. */
+export function ensureActiveSession(projectId: string | null = null): SessionContext {
+  const existing = getActiveSession();
+  if (existing) return existing;
+  const linked =
+    projectId && load().projects.some((p) => p.id === projectId)
+      ? projectId
+      : getActiveProjectId();
+  return createSession(linked);
+}
+
 /** Active session, or null. Heals a dangling activeSessionId (deleted session). */
 export function getActiveSession(): SessionContext | null {
   const d = load();
@@ -526,6 +541,7 @@ export function createSession(projectId: string | null = null): SessionContext {
     title: NEW_SESSION_TITLE,
     contextText: "",
     projectId: linked,
+    memoryUpdatedAt: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -552,6 +568,37 @@ export function setSessionContext(id: string, text: string): SessionContext | nu
   session.updatedAt = Date.now();
   persist();
   return session;
+}
+
+/**
+ * Updates session standing context from auto-memory refresh. Preserves a title
+ * already set from the first Refine draft; only derives from GOAL when still "New session".
+ */
+export function refreshSessionContext(id: string, text: string): SessionContext | null {
+  const d = load();
+  const session = d.sessions.find((s) => s.id === id);
+  if (!session) return null;
+  session.contextText = clampContextText(text);
+  if (session.title === NEW_SESSION_TITLE) {
+    session.title = deriveSessionTitle(session.contextText, session.createdAt);
+  }
+  session.memoryUpdatedAt = Date.now();
+  session.updatedAt = Date.now();
+  persist();
+  return session;
+}
+
+/** Applied/copied runs for a session since the last memory refresh (newest first). */
+export function listSessionMemoryRuns(sessionId: string, since: number | null): RunRecord[] {
+  const cutoff = since ?? 0;
+  return load()
+    .history.filter(
+      (r) =>
+        r.sessionId === sessionId &&
+        (r.actions?.applied || r.actions?.copied) &&
+        r.createdAt > cutoff,
+    )
+    .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** Titles a placeholder session from the first Refine draft; no-op if already named. */
@@ -738,21 +785,42 @@ export function deleteProject(id: string): void {
 // ---------- File memory (context layer) ----------
 const FILE_MEMORY_MAX = 200;
 
-/** Record editor file names (case-insensitive dedupe, LRU by lastSeen, cap 200). */
-export function recordFileMemory(names: string[]): void {
+function fileMemoryScopeKey(projectId: string | null | undefined): string {
+  return projectId ?? "__unscoped__";
+}
+
+function matchesFileMemoryScope(entry: FileMemoryEntry, projectId: string | null): boolean {
+  const scope = fileMemoryScopeKey(entry.projectId);
+  if (scope === "__unscoped__") return true;
+  return scope === fileMemoryScopeKey(projectId);
+}
+
+/** Record editor file names scoped to activeProjectId when screenContext is on. */
+export function recordFileMemory(names: string[], projectId?: string | null): void {
   if (names.length === 0) return;
   const d = load();
+  const scope = projectId === undefined ? getActiveProjectId() : projectId;
+  const scopeKey = fileMemoryScopeKey(scope);
   const now = Date.now();
   for (const name of names) {
     const trimmed = name.trim();
     if (!trimmed || isExcludedContextFileName(trimmed)) continue;
-    const existing = d.fileMemory.find((e) => e.name.toLowerCase() === trimmed.toLowerCase());
+    const existing = d.fileMemory.find(
+      (e) =>
+        e.name.toLowerCase() === trimmed.toLowerCase() &&
+        fileMemoryScopeKey(e.projectId) === scopeKey,
+    );
     if (existing) {
       existing.lastSeen = now;
       existing.hits += 1;
       existing.name = trimmed;
     } else {
-      d.fileMemory.push({ name: trimmed, lastSeen: now, hits: 1 });
+      d.fileMemory.push({
+        name: trimmed,
+        lastSeen: now,
+        hits: 1,
+        projectId: scope,
+      });
     }
   }
   if (d.fileMemory.length > FILE_MEMORY_MAX) {
@@ -762,11 +830,11 @@ export function recordFileMemory(names: string[]): void {
   persist();
 }
 
-/** Most recently seen file names, newest first. */
-export function listFileMemory(limit = 50): string[] {
+/** Most recently seen file names for a project (includes legacy unscoped entries). */
+export function listFileMemory(limit = 50, projectId: string | null = getActiveProjectId()): string[] {
   return [...load().fileMemory]
+    .filter((e) => matchesFileMemoryScope(e, projectId) && !isExcludedContextFileName(e.name))
     .sort((a, b) => b.lastSeen - a.lastSeen)
-    .filter((e) => !isExcludedContextFileName(e.name))
     .slice(0, limit)
     .map((e) => e.name);
 }

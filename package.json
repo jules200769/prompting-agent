@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "framer-motion": "^12.42.2",
     "koffi": "^3.0.2",
     "openai": "^4.67.0",
     "react": "^18.3.1",

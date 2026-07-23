@@ -141,6 +141,22 @@ describe("run ledger storage", () => {
     expect(JSON.parse(lines[lines.length - 1]).event).toBe("finalized");
   });
 
+  it("addRunRecord stamps sessionId from the active session", () => {
+    const session = store.createSession();
+    const id = store.addRunRecord(sampleResult(), baseReq, "overlay");
+    const record = store.listHistory().find((r) => r.id === id);
+    expect(record?.sessionId).toBe(session.id);
+  });
+
+  it("listSessionMemoryRuns returns only finalized runs after memoryUpdatedAt", () => {
+    const session = store.createSession();
+    const id = store.addRunRecord(sampleResult(), baseReq, "overlay");
+    store.finalizeRun({ id, finalPrompt: "applied text", action: "apply" });
+    expect(store.listSessionMemoryRuns(session.id, null)).toHaveLength(1);
+    const refreshed = store.refreshSessionContext(session.id, "1. GOAL — refreshed.");
+    expect(store.listSessionMemoryRuns(session.id, refreshed!.memoryUpdatedAt)).toHaveLength(0);
+  });
+
   it("clearHistory clears UI store but keeps JSONL append-only file", () => {
     store.addRunRecord(sampleResult(), baseReq, "studio");
     store.clearHistory();

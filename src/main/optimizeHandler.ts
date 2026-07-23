@@ -3,6 +3,7 @@
 import type { OptimizeRequest, OptimizeWithRunId, RunSurface } from "../shared/types";
 import { optimize } from "../engine/orchestrator";
 import { computeGrounding } from "../shared/grounding";
+import { mergeStandingNotes } from "../shared/standingNotes";
 import * as store from "./storage";
 
 export async function runOptimize(
@@ -15,8 +16,11 @@ export async function runOptimize(
   // always overwritten so the store stays the single source of truth.
   const sessionText = store.getActiveSession()?.contextText.trim();
   const projectText = store.getProjectContext().trim();
+  const settings = store.getSettings();
+  const context = mergeStandingNotes(settings.contextMemory, req.context);
   const enriched: OptimizeRequest = {
     ...req,
+    context,
     sessionContext: sessionText || undefined,
     projectContext: projectText || undefined,
   };

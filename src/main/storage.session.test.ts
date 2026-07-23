@@ -40,6 +40,24 @@ describe("session CRUD", () => {
     expect(onDisk.activeSessionId).toBe(s.id);
   });
 
+  it("refreshSessionContext preserves a non-placeholder title and sets memoryUpdatedAt", () => {
+    const s = store.createSession();
+    store.maybeTitleSessionFromPrompt(s.id, "Overlay polish");
+    const updated = store.refreshSessionContext(
+      s.id,
+      "1. GOAL — Ship overlay polish.\n2. CURRENT STATE — memory refresh wired.",
+    );
+    expect(updated?.title).toBe("Overlay polish");
+    expect(updated?.memoryUpdatedAt).toBeTypeOf("number");
+    expect(updated?.contextText).toContain("memory refresh wired");
+  });
+
+  it("refreshSessionContext derives title from GOAL when still New session", () => {
+    const s = store.createSession();
+    const updated = store.refreshSessionContext(s.id, "1. GOAL — Parser bug fix.");
+    expect(updated?.title).toBe("Parser bug fix.");
+  });
+
   it("sessions are isolated — updating one leaves others untouched", () => {
     const a = store.createSession();
     store.setSessionContext(a.id, "context A");
@@ -313,5 +331,44 @@ describe("store migration", () => {
     expect(onDisk.activeProjectId).toBe(projects[0].id);
     vi.doUnmock("electron");
     vi.resetModules();
+  });
+});
+
+describe("ensureActiveSession", () => {
+  it("returns the existing active session without creating a duplicate", () => {
+    const s = store.createSession();
+    const ensured = store.ensureActiveSession();
+    expect(ensured.id).toBe(s.id);
+    expect(store.listSessions()).toHaveLength(1);
+  });
+
+  it("creates and activates a session when none is active", () => {
+    store.setActiveSession(null);
+    const ensured = store.ensureActiveSession();
+    expect(ensured.title).toBe("New session");
+    expect(store.getActiveSession()?.id).toBe(ensured.id);
+  });
+
+  it("links a new session to the requested project when valid", () => {
+    store.setActiveSession(null);
+    const project = store.upsertActiveProject("1. PROJECT — Scoped app.");
+    const ensured = store.ensureActiveSession(project.id);
+    expect(ensured.projectId).toBe(project.id);
+  });
+});
+
+describe("scoped fileMemory", () => {
+  it("records and lists files per project while unscoped entries remain global", () => {
+    const projectA = store.upsertActiveProject("1. PROJECT — File scope A.");
+    store.recordFileMemory(["Overlay.tsx"], projectA.id);
+    store.recordFileMemory(["storage.ts"], null);
+
+    expect(store.listFileMemory(50, projectA.id)).toContain("Overlay.tsx");
+    expect(store.listFileMemory(50, projectA.id)).toContain("storage.ts");
+
+    store.setActiveProject(null);
+    const projectB = store.upsertActiveProject("1. PROJECT — File scope B.");
+    expect(store.listFileMemory(50, projectB.id)).toContain("storage.ts");
+    expect(store.listFileMemory(50, projectB.id)).not.toContain("Overlay.tsx");
   });
 });

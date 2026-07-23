@@ -8,13 +8,14 @@ import {
   type CaptureMode,
   type InjectResult,
   type OverlayPlacement,
+  type ContextCompactRequest,
   type HistoryAddCommentRequest,
   type HistoryFinalizeRequest,
   type Provider,
   type RunRecord,
   type SettingsSetResult,
 } from "../shared/types";
-import { devBridgeOptimize, devBridgeSettingsGet } from "./devBridgeClient";
+import { devBridgeOptimize, devBridgeSettingsGet, devBridgeContextCompact } from "./devBridgeClient";
 import type { ContextImportScope } from "../shared/contextImportPrompt";
 import {
   assignProjectColor,
@@ -42,8 +43,11 @@ type OverlayShowPayload = {
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
+  cursorTerminalContext?: boolean;
   /** Dev bridge / browser mock never seed destination context. */
   context?: CaptureContext;
+  /** True when capture froze a focused text field for Apply injection. */
+  canInject?: boolean;
   /** Anvyll summary detected on the clipboard at delivery — drives the consent toast. */
   clipboardSummary?: { scope: ContextImportScope; text: string };
 };
@@ -93,6 +97,7 @@ function createBrowserMock(): AnvyllAPI {
     text: SAMPLE_PROMPT,
     mode: "field",
     snapshot: { text: SAMPLE_PROMPT, hasText: true },
+    canInject: true,
   };
 
   return {
@@ -186,6 +191,7 @@ function createBrowserMock(): AnvyllAPI {
         title: NEW_SESSION_TITLE,
         contextText: "",
         projectId: linked,
+        memoryUpdatedAt: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -232,6 +238,25 @@ function createBrowserMock(): AnvyllAPI {
       if (title === NEW_SESSION_TITLE) return session;
       session.title = title;
       session.updatedAt = Date.now();
+      return session;
+    },
+    sessionEnsureActive: async (projectId?: string | null) => {
+      const existing = mockSessions.find((s) => s.id === mockActiveSessionId);
+      if (existing) return existing;
+      const now = Date.now();
+      const linked =
+        projectId && mockProjects.some((p) => p.id === projectId) ? projectId : null;
+      const session: SessionContext = {
+        id: `mock-${now}-${mockSessions.length}`,
+        title: NEW_SESSION_TITLE,
+        contextText: "",
+        projectId: linked,
+        memoryUpdatedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      mockSessions.push(session);
+      mockActiveSessionId = session.id;
       return session;
     },
     projectContextGet: async () => mockProjectContext,
@@ -313,6 +338,44 @@ function createBrowserMock(): AnvyllAPI {
       }
       return true;
     },
+    projectPromoteFromSession: async (sessionId: string) => {
+      const session = mockSessions.find((s) => s.id === sessionId);
+      if (!session?.contextText.trim()) throw new Error("Session has no context to promote.");
+      const projectId = session.projectId ?? mockActiveProjectId;
+      if (!projectId) throw new Error("Link the session to a project before promoting context.");
+      const project = mockProjects.find((p) => p.id === projectId);
+      if (!project) throw new Error("Project not found.");
+      project.contextText = clampContextText(
+        `${project.contextText}\n\n${session.contextText}`.trim(),
+        PROJECT_CONTEXT_MAX_CHARS,
+      );
+      project.updatedAt = Date.now();
+      if (mockActiveProjectId === projectId) mockProjectContext = project.contextText;
+      return project.contextText;
+    },
+    contextCompact: async (req: ContextCompactRequest) => {
+      try {
+        return await devBridgeContextCompact(req);
+      } catch {
+        const firstLine = req.text.trim().split("\n").map((l) => l.trim()).find(Boolean) ?? "not established";
+        const goal = firstLine.slice(0, 200);
+        const stub =
+          req.scope === "session"
+            ? `1. GOAL — ${goal}
+2. CURRENT STATE — not established
+3. KEY FACTS & DECISIONS — not established
+4. CONSTRAINTS & PREFERENCES — not established
+5. TERMINOLOGY & NAMES — not established
+6. OPEN ITEMS — not established`
+            : `1. PROJECT — ${goal}
+2. STACK & ARCHITECTURE — not established
+3. CONVENTIONS — not established
+4. KEY FACTS & DECISIONS — not established
+5. CONSTRAINTS & PREFERENCES — not established
+6. TERMINOLOGY & NAMES — not established`;
+        return { text: clampContextText(stub, PROJECT_CONTEXT_MAX_CHARS) };
+      }
+    },
 
     openStudio: () => {
       window.location.hash = "#/studio";
@@ -348,6 +411,7 @@ function createBrowserMock(): AnvyllAPI {
 
     onOverlayCapturePending: () => () => undefined,
     onOverlayClear: () => () => undefined,
+    onSessionMemoryUpdated: () => () => undefined,
     onSettingsChanged: (cb) => {
       mockSettingsChangedCallbacks.add(cb);
       return () => mockSettingsChangedCallbacks.delete(cb);

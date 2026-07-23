@@ -17,7 +17,7 @@ import {
 } from "../shared/contextSignals";
 import type { HostKind } from "../shared/injectStrategy";
 import type { UiaTargetMeta } from "./capture";
-import { getSettings, listFileMemory, recordFileMemory } from "./storage";
+import { getSettings, listFileMemory, recordFileMemory, getActiveProjectId } from "./storage";
 
 function cleanCaptureField(text: string | undefined): string | undefined {
   if (!text) return undefined;
@@ -121,7 +121,12 @@ export function assembleCaptureContext(opts: {
         ? (extractFileFromEditorTitle(windowTitle, processName) ?? undefined)
         : undefined;
     const cleanedCaptured = stripUiPrivateUseGlyphs(opts.capturedText);
-    const matched = relevantFileMemory(cleanedCaptured, listFileMemory(), activeFile, CONTEXT_CAPS.files);
+    const matched = relevantFileMemory(
+      cleanedCaptured,
+      listFileMemory(CONTEXT_CAPS.files, getActiveProjectId()),
+      activeFile,
+      CONTEXT_CAPS.files,
+    );
     const recentFiles = matched.filter((f) => f.toLowerCase() !== activeFile?.toLowerCase());
     if (activeFile || recentFiles.length > 0) {
       ctx.files = { activeFile, recentFiles: recentFiles.length > 0 ? recentFiles : undefined };
@@ -142,7 +147,7 @@ export function harvestFileMemory(title: string | undefined, processName: string
   try {
     if (!getSettings().screenContext) return;
     const file = extractFileFromEditorTitle(title, processName);
-    if (file) recordFileMemory([file]);
+    if (file) recordFileMemory([file], getActiveProjectId());
   } catch (err) {
     console.warn("[Anvyll] harvestFileMemory failed:", err);
   }

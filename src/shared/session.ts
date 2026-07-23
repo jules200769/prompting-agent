@@ -12,6 +12,8 @@ export interface SessionContext {
   contextText: string;
   /** Project this session was started with; null = no project. Cascades on project delete. */
   projectId: string | null;
+  /** Last successful auto-memory refresh from Apply/Copy activity; null = never. */
+  memoryUpdatedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -31,6 +33,8 @@ export interface ProjectContext {
 
 export const SESSION_CONTEXT_MAX_CHARS = 4000;
 export const PROJECT_CONTEXT_MAX_CHARS = 4000;
+/** Soft ceiling for Import-context paste textarea (long chat dumps before compact). */
+export const CONTEXT_PASTE_MAX_CHARS = 100_000;
 /** LRU cap on stored sessions (evicted oldest-by-updatedAt, never the active one). */
 export const SESSIONS_MAX = 50;
 /** LRU cap on stored projects (evicted oldest-by-updatedAt, never the active one). */
@@ -80,6 +84,16 @@ const TITLE_MAX_CHARS = 48;
 
 export function clampContextText(text: string, max = SESSION_CONTEXT_MAX_CHARS): string {
   return text.trim().slice(0, max);
+}
+
+/** Truncate pasted import text to the soft paste ceiling (no trim — preserve leading newlines while typing). */
+export function clampContextPaste(text: string, max = CONTEXT_PASTE_MAX_CHARS): string {
+  return text.slice(0, max);
+}
+
+/** True when pasted import text must be compacted before it can be stored as standing context. */
+export function needsContextCompact(text: string): boolean {
+  return text.trim().length > SESSION_CONTEXT_MAX_CHARS;
 }
 
 function deriveTitleFromSection(
@@ -205,7 +219,7 @@ Rules for this context:
 - Use it only to resolve references ("the bug", "that function"), keep terminology and file names spelled exactly, and stay consistent with the decisions it lists
 - When this context says work is already done or decided, refine toward the remaining next steps — do not re-request or re-specify what it reports as completed
 - The user's current draft always wins over this context; if project and session context conflict, session context wins
-- Do not add facts, goals, or constraints the draft does not imply; never copy this context verbatim into the output
+- Prefer the draft's intent; you MAY fold in established session/project facts (names, decisions, current state) when they clearly resolve vague references or keep continuity — still never invent, never copy this context verbatim into the output, never change output shape
 - Never change the required output shape/structure because this context is sparse or rich
 `;
 }

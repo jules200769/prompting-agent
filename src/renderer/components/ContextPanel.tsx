@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { groupSessionsByProject, type ProjectContext, type SessionContext } from "../../shared/session";
+import { shouldSuggestPromoteToProject } from "../../shared/sessionPromote";
 
 function TrashIcon() {
   return (
@@ -38,6 +39,8 @@ export interface ContextPanelProps {
   onNewProject(): void;
   onBringContext(): void;
   onEditProjectMemory(p: ProjectContext): void;
+  standingProjectContext?: string;
+  onPromoteSessionToProject?(sessionId: string): void;
   onClose(): void;
   panelRef?: RefObject<HTMLDivElement>;
 }
@@ -55,11 +58,21 @@ export function ContextPanel({
   onNewProject,
   onBringContext,
   onEditProjectMemory,
+  standingProjectContext = "",
+  onPromoteSessionToProject,
   onClose,
   panelRef,
 }: ContextPanelProps) {
   const groups = groupSessionsByProject(sessions, projects);
   const everythingEmpty = projects.length === 0 && sessions.length === 0;
+  const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null;
+  const promoteSessionId =
+    activeSession &&
+    activeSession.projectId &&
+    onPromoteSessionToProject &&
+    shouldSuggestPromoteToProject(activeSession.contextText, standingProjectContext)
+      ? activeSession.id
+      : null;
 
   if (pendingDeleteProject) {
     const linkedCount = sessions.filter((s) => s.projectId === pendingDeleteProject.id).length;
@@ -221,13 +234,26 @@ export function ContextPanel({
         })}
       </div>
 
+      {promoteSessionId && (
+        <button
+          type="button"
+          onClick={() => {
+            onPromoteSessionToProject?.(promoteSessionId);
+            onClose();
+          }}
+          className="w-full mt-2 rounded-xl px-3 py-2 text-[12px] text-left text-white/70 hover:bg-white/10 transition border border-white/10"
+        >
+          Suggest: add session facts to project memory
+        </button>
+      )}
+
       <div className="flex items-center gap-2 pt-2 mt-1 border-t border-white/10">
         <button
           type="button"
           onClick={onNewProject}
-          className="rounded-full px-3 py-1.5 text-[12px] font-medium bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition"
+          className="apple-glass-pill--accent rounded-full px-3 py-1.5 text-[12px] font-medium transition opacity-40 hover:opacity-60"
         >
-          ＋ Project
+          New Project
         </button>
         <button
           type="button"

@@ -1,6 +1,6 @@
 // Preload: exposes a tight allowlist IPC API to the renderer. No Node globals leak.
 import { contextBridge, ipcRenderer } from "electron";
-import { IPC, type OptimizeRequest, type AppSettings, type CaptureContext, type CaptureMode, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type InjectResult, type OverlayPlacement, type Provider, type RunRecord, type SettingsSetResult, type WorkbenchSeed } from "../shared/types";
+import { IPC, type OptimizeRequest, type AppSettings, type CaptureContext, type CaptureMode, type ContextCompactRequest, type ContextCompactResult, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type InjectResult, type OverlayPlacement, type Provider, type RunRecord, type SettingsSetResult, type WorkbenchSeed } from "../shared/types";
 import type { ThemeId } from "../shared/themes";
 import type { ContextImportScope } from "../shared/contextImportPrompt";
 import type { ProjectContext, SessionContext } from "../shared/session";
@@ -10,7 +10,10 @@ type OverlayShowPayload = {
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
+  cursorTerminalContext?: boolean;
   context?: CaptureContext;
+  /** True when capture froze a focused text field for Apply injection. */
+  canInject?: boolean;
   /** Anvyll summary detected on the clipboard at delivery — drives the consent toast. */
   clipboardSummary?: { scope: ContextImportScope; text: string };
 };
@@ -113,6 +116,15 @@ const api = {
   sessionGetActive: () => ipcRenderer.invoke(IPC.SESSION_GET_ACTIVE) as Promise<SessionContext | null>,
   sessionMaybeTitleFromPrompt: (id: string, prompt: string) =>
     ipcRenderer.invoke(IPC.SESSION_MAYBE_TITLE_FROM_PROMPT, id, prompt) as Promise<SessionContext | null>,
+  sessionEnsureActive: (projectId?: string | null) =>
+    ipcRenderer.invoke(IPC.SESSION_ENSURE_ACTIVE, projectId ?? null) as Promise<SessionContext>,
+  onSessionMemoryUpdated: (cb: (session: SessionContext) => void): (() => void) => {
+    const listener = (_e: unknown, session: SessionContext) => cb(session);
+    ipcRenderer.on(IPC.SESSION_MEMORY_UPDATED, listener);
+    return () => {
+      ipcRenderer.removeListener(IPC.SESSION_MEMORY_UPDATED, listener);
+    };
+  },
   projectContextGet: () => ipcRenderer.invoke(IPC.PROJECT_CONTEXT_GET) as Promise<string>,
   projectContextSet: (text: string) => ipcRenderer.invoke(IPC.PROJECT_CONTEXT_SET, text) as Promise<boolean>,
   projectList: () =>
@@ -127,6 +139,10 @@ const api = {
   projectSetActive: (id: string | null) =>
     ipcRenderer.invoke(IPC.PROJECT_SET_ACTIVE, id) as Promise<ProjectContext | null>,
   projectDelete: (id: string) => ipcRenderer.invoke(IPC.PROJECT_DELETE, id) as Promise<boolean>,
+  projectPromoteFromSession: (sessionId: string) =>
+    ipcRenderer.invoke(IPC.PROJECT_PROMOTE_FROM_SESSION, sessionId) as Promise<string>,
+  contextCompact: (req: ContextCompactRequest) =>
+    ipcRenderer.invoke(IPC.CONTEXT_COMPACT, req) as Promise<ContextCompactResult>,
 
   openStudio: () => ipcRenderer.send(IPC.STUDIO_SHOW),
   openSettings: () => ipcRenderer.send(IPC.STUDIO_SETTINGS),

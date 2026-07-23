@@ -2,7 +2,7 @@
 import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, shell, screen, clipboard } from "electron";
 import { join } from "node:path";
 import { detectContextSummary } from "../shared/contextSummaryDetect";
-import { DEFAULT_SETTINGS, IPC, type AppSettings, type CaptureContext, type CaptureMode, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type OptimizeRequest, type OverlayPlacement, type Provider, type RunSurface, type SettingsSetResult, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
+import { DEFAULT_SETTINGS, IPC, type AppSettings, type CaptureContext, type CaptureMode, type ContextCompactRequest, type HistoryAddCommentRequest, type HistoryFinalizeRequest, type HotkeyStatus, type OptimizeRequest, type OverlayPlacement, type Provider, type RunSurface, type SettingsSetResult, type WorkbenchSeed, isOverlayPlacement } from "../shared/types";
 import { normalizeTheme, type ThemeId } from "../shared/themes";
 import { resolveOverlayPosition } from "../shared/overlayPosition";
 import { acceleratorDisplayParts, normalizeAccelerator } from "../shared/accelerator";
@@ -10,6 +10,9 @@ import { analyze } from "../engine/orchestrator";
 import * as store from "./storage";
 import { keyStore } from "./keyStore";
 import { runOptimize } from "./optimizeHandler";
+import { runContextCompact } from "./contextCompactHandler";
+import { scheduleSessionMemoryRefresh, setSessionMemoryNotifier } from "./sessionMemoryRefresh";
+import { runPromoteSessionToProject } from "./projectPromoteHandler";
 import { startDevBridge } from "./devBridge";
 import {
   rememberForeground,
@@ -57,7 +60,9 @@ let pendingCapture: {
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
+  cursorTerminalContext?: boolean;
   context?: CaptureContext;
+  canInject?: boolean;
 } | null = null;
 let isOptimizing = false;
 let hotkeyInFlight = false;
@@ -205,7 +210,9 @@ async function deliverCaptureToOverlay(capture: {
   mode: CaptureMode;
   snapshot: { text: string; hasText: boolean };
   terminalContext?: boolean;
+  cursorTerminalContext?: boolean;
   context?: CaptureContext;
+  canInject?: boolean;
 }): Promise<void> {
   if (!overlay) overlay = createOverlay();
   if (overlay.webContents.isLoading()) {
@@ -230,7 +237,9 @@ async function deliverCaptureToOverlay(capture: {
     mode: capture.mode,
     snapshot: capture.snapshot,
     terminalContext: capture.terminalContext ?? false,
+    cursorTerminalContext: capture.cursorTerminalContext ?? false,
     context: capture.context,
+    canInject: capture.canInject ?? false,
     clipboardSummary: summaryScope ? { scope: summaryScope, text: clip } : undefined,
   });
   await prepared;
@@ -367,6 +376,7 @@ async function showOverlayShell(): Promise<void> {
     mode: "field",
     snapshot: { text: "", hasText: false },
     terminalContext: false,
+    canInject: false,
   });
   await prepared;
   overlay.setOpacity(1);
@@ -510,6 +520,11 @@ function detectOptimizeSurface(url: string): RunSurface {
 
 // ---------- IPC handlers ----------
 function registerIpc(): void {
+  setSessionMemoryNotifier((session) => {
+    overlay?.webContents.send(IPC.SESSION_MEMORY_UPDATED, session);
+    studio?.webContents.send(IPC.SESSION_MEMORY_UPDATED, session);
+  });
+
   ipcMain.handle(IPC.OPTIMIZE, async (evt, req: OptimizeRequest) => {
     const win = BrowserWindow.fromWebContents(evt.sender);
     const surface = detectOptimizeSurface(evt.sender.getURL());
@@ -623,9 +638,16 @@ function registerIpc(): void {
   ipcMain.handle(IPC.HISTORY_ADD_COMMENT, (_evt, payload: HistoryAddCommentRequest) =>
     store.addRunComment(payload),
   );
-  ipcMain.handle(IPC.HISTORY_FINALIZE, (_evt, payload: HistoryFinalizeRequest) =>
-    store.finalizeRun(payload),
-  );
+  ipcMain.handle(IPC.HISTORY_FINALIZE, (_evt, payload: HistoryFinalizeRequest) => {
+    const record = store.finalizeRun(payload);
+    if (
+      record?.sessionId &&
+      (payload.action === "apply" || payload.action === "copy")
+    ) {
+      scheduleSessionMemoryRefresh(record.sessionId);
+    }
+    return record;
+  });
   ipcMain.handle(IPC.HISTORY_ANALYSIS_PATH, () => store.getRunHistoryAnalysisPath());
 
   ipcMain.handle(IPC.SESSION_LIST, () => store.listSessions());
@@ -640,6 +662,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.SESSION_MAYBE_TITLE_FROM_PROMPT, (_evt, id: string, prompt: string) =>
     store.maybeTitleSessionFromPrompt(id, prompt),
   );
+  ipcMain.handle(IPC.SESSION_ENSURE_ACTIVE, (_evt, projectId?: string | null) =>
+    store.ensureActiveSession(projectId ?? null),
+  );
   ipcMain.handle(IPC.PROJECT_CONTEXT_GET, () => store.getProjectContext());
   ipcMain.handle(IPC.PROJECT_CONTEXT_SET, (_evt, text: string) => { store.setProjectContext(text); return true; });
   ipcMain.handle(IPC.PROJECT_LIST, () => ({
@@ -652,6 +677,10 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.PROJECT_SET_ACTIVE, (_evt, id: string | null) => store.setActiveProject(id));
   ipcMain.handle(IPC.PROJECT_DELETE, (_evt, id: string) => { store.deleteProject(id); return true; });
+  ipcMain.handle(IPC.PROJECT_PROMOTE_FROM_SESSION, (_evt, sessionId: string) =>
+    runPromoteSessionToProject(sessionId),
+  );
+  ipcMain.handle(IPC.CONTEXT_COMPACT, (_evt, req: ContextCompactRequest) => runContextCompact(req));
 
   ipcMain.on(IPC.OVERLAY_HIDE, () => {
     void hideOverlay();

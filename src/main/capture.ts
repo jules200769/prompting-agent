@@ -19,6 +19,7 @@ import {
   type TerminalBounds,
   type TerminalSnapshotContext,
 } from "../shared/terminalCapture";
+import { isCursorProcessName } from "../shared/overlayActions";
 import { getForegroundHwnd, normalizeHwnd, allowSetForeground } from "./win32";
 import {
   classifyInjectHostKind,
@@ -198,8 +199,12 @@ export interface CaptureResult {
   uia: UiaTargetMeta | null;
   /** True when capture came from (or failed in) a terminal context ? overlay shows terminal hint. */
   terminalContext?: boolean;
+  /** True only for Cursor's integrated terminal; renderer makes these sessions copy-only. */
+  cursorTerminalContext?: boolean;
   /** Destination context for the rewrite (screenContext on, never for password fields). */
   context?: CaptureContext;
+  /** True when a focused text field was captured and Apply can inject refined output. */
+  canInject?: boolean;
 }
 
 async function readCaptureMeta(metaPath: string): Promise<UiaTargetMeta | null> {
@@ -254,6 +259,16 @@ function freezeInjectTarget(
 ): void {
   lastForegroundHwnd = windowHwnd;
   frozenInjectTarget = buildInjectTarget(windowHwnd, uia, ctx);
+}
+
+/** Freeze inject target when UIA identifies a focused text field. */
+function freezeFieldInjectTarget(windowHwnd: number, uia: UiaTargetMeta | null): boolean {
+  if (uia == null) return false;
+  freezeInjectTarget(windowHwnd, uia, {
+    topClassName: lastSnapshotContext.className,
+    processName: lastSnapshotContext.process,
+  });
+  return true;
 }
 
 function freezeTerminalInjectTarget(windowHwnd: number, ctx?: TerminalSnapshotContext): void {
@@ -564,6 +579,9 @@ async function captureViaScript(hwnd: number, metaPath: string): Promise<string>
 
 /** Attach destination context to a capture result + defer file-memory harvest off the hotkey path. */
 function withCaptureContext(result: CaptureResult): CaptureResult {
+  if (result.terminalContext) {
+    result.cursorTerminalContext = isCursorProcessName(lastSnapshotContext.process);
+  }
   const sidecar = pendingContextSignals;
   const signals = pendingSnapshotSignals;
   pendingContextSignals = null;
@@ -591,7 +609,7 @@ export async function captureSelection(): Promise<CaptureResult> {
     pendingCaptureText = null;
     console.warn("[Anvyll] capture: password field ? nothing captured");
     restoreClipboardSnapshot(snapshot);
-    return { text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null };
+    return { text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null, canInject: false };
   }
 
   if (lastForegroundHwnd == null) {
@@ -602,7 +620,7 @@ export async function captureSelection(): Promise<CaptureResult> {
   if (hwnd == null || hwnd === 0) {
     console.warn("[Anvyll] capture: no target window tracked (click in a text field first, then press the hotkey)");
     restoreClipboardSnapshot(snapshot);
-    return { text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null };
+    return { text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null, canInject: false };
   }
 
   console.log("[Anvyll] capture: target hwnd", hwnd);
@@ -621,6 +639,7 @@ export async function captureSelection(): Promise<CaptureResult> {
         snapshot,
         uia: null,
         terminalContext: true,
+        canInject: true,
       });
     }
     console.warn("[Anvyll] capture: terminal with no usable input ? select text or type at the prompt");
@@ -631,6 +650,7 @@ export async function captureSelection(): Promise<CaptureResult> {
       snapshot: { text: "", hasText: false },
       uia: null,
       terminalContext: true,
+      canInject: false,
     });
   }
 
@@ -639,23 +659,27 @@ export async function captureSelection(): Promise<CaptureResult> {
   if (shouldSkipDraftForSelection()) {
     pendingCaptureText = null;
     pendingUiaMeta = null;
+    const canInject = freezeFieldInjectTarget(hwnd, earlyUiaPeek);
     console.log("[Anvyll] capture: text selection present ? compose mode (no draft)");
     return withCaptureContext({
       text: "",
       mode: "empty",
       snapshot,
       uia: earlyUiaPeek,
+      canInject,
     });
   }
   if (earlyUiaPeek != null && !(earlyTextPeek?.trim())) {
     pendingCaptureText = null;
     pendingUiaMeta = null;
+    const canInject = freezeFieldInjectTarget(hwnd, earlyUiaPeek);
     console.log("[Anvyll] capture: empty field ? compose mode");
     return withCaptureContext({
       text: "",
       mode: "empty",
       snapshot,
       uia: earlyUiaPeek,
+      canInject,
     });
   }
   if (shouldUseEarlyCaptureFastPath(earlyTextPeek, earlyUiaPeek != null)) {
@@ -671,6 +695,7 @@ export async function captureSelection(): Promise<CaptureResult> {
         snapshot,
         uia: null,
         terminalContext: true,
+        canInject: true,
       });
     }
     if (resolved.mode === "field" && resolved.text.trim()) {
@@ -686,7 +711,7 @@ export async function captureSelection(): Promise<CaptureResult> {
         topClassName: lastSnapshotContext.className,
         processName: lastSnapshotContext.process,
       });
-      return withCaptureContext({ text, mode: "field", snapshot, uia: earlyUiaPeek });
+      return withCaptureContext({ text, mode: "field", snapshot, uia: earlyUiaPeek, canInject: true });
     }
     pendingCaptureText = earlyTextPeek;
     pendingUiaMeta = earlyUiaPeek;
@@ -708,6 +733,7 @@ export async function captureSelection(): Promise<CaptureResult> {
       snapshot: { text: "", hasText: false },
       uia: null,
       terminalContext: inTerminalContext,
+      canInject: false,
     });
   }
 
@@ -747,6 +773,7 @@ export async function captureSelection(): Promise<CaptureResult> {
       snapshot,
       uia: null,
       terminalContext: true,
+      canInject: true,
     });
   }
 
@@ -763,7 +790,7 @@ export async function captureSelection(): Promise<CaptureResult> {
       topClassName: lastSnapshotContext.className,
       processName: lastSnapshotContext.process,
     });
-    return withCaptureContext({ text: text.trim(), mode: "field", snapshot, uia: uiaMeta });
+    return withCaptureContext({ text: text.trim(), mode: "field", snapshot, uia: uiaMeta, canInject: true });
   }
 
   console.warn("[Anvyll] capture: hwnd ok but no text read");
@@ -783,6 +810,7 @@ export async function captureSelection(): Promise<CaptureResult> {
       snapshot,
       uia: null,
       terminalContext: true,
+      canInject: true,
     });
   }
   if (resolvedText.mode === "field" && resolvedText.text.trim()) {
@@ -790,7 +818,13 @@ export async function captureSelection(): Promise<CaptureResult> {
       topClassName: lastSnapshotContext.className,
       processName: lastSnapshotContext.process,
     });
-    return withCaptureContext({ text: resolvedText.text.trim(), mode: "field", snapshot, uia: uiaMeta });
+    return withCaptureContext({
+      text: resolvedText.text.trim(),
+      mode: "field",
+      snapshot,
+      uia: uiaMeta,
+      canInject: true,
+    });
   }
 
   if (inTerminalContext) {
@@ -801,11 +835,18 @@ export async function captureSelection(): Promise<CaptureResult> {
       snapshot: { text: "", hasText: false },
       uia: null,
       terminalContext: true,
+      canInject: false,
     });
   }
 
   restoreClipboardSnapshot(snapshot);
-  return withCaptureContext({ text: "", mode: "empty", snapshot: { text: "", hasText: false }, uia: null });
+  return withCaptureContext({
+    text: "",
+    mode: "empty",
+    snapshot: { text: "", hasText: false },
+    uia: null,
+    canInject: false,
+  });
 }
 
 export async function injectText(text: string, snapshot: { text: string; hasText: boolean }): Promise<"injected" | "copied"> {

@@ -4,6 +4,7 @@ import type { SessionContext } from "../shared/session";
 
 let activeSession: SessionContext | null = null;
 let projectContext = "";
+let settingsContextMemory = "";
 const cacheHash = vi.fn(() => "hash");
 const getCache = vi.fn(() => null);
 const setCache = vi.fn();
@@ -12,6 +13,7 @@ const addRunRecord = vi.fn(() => "run-123");
 vi.mock("./storage", () => ({
   getActiveSession: () => activeSession,
   getProjectContext: () => projectContext,
+  getSettings: () => ({ contextMemory: settingsContextMemory }),
   cacheHash: (req: OptimizeRequest) => cacheHash(req),
   getCache: (...args: unknown[]) => getCache(...(args as [])),
   setCache: (...args: unknown[]) => setCache(...(args as [])),
@@ -44,7 +46,15 @@ const baseReq: OptimizeRequest = { prompt: "fix the bug", model: "gpt-5", level:
 
 function session(contextText: string): SessionContext {
   const now = Date.now();
-  return { id: "s1", title: "t", contextText, projectId: null, createdAt: now, updatedAt: now };
+  return {
+    id: "s1",
+    title: "t",
+    contextText,
+    projectId: null,
+    memoryUpdatedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 const cachedResult: OptimizeResult = {
@@ -66,6 +76,7 @@ const cachedResult: OptimizeResult = {
 beforeEach(() => {
   activeSession = null;
   projectContext = "";
+  settingsContextMemory = "";
   getCache.mockReturnValue(null);
   vi.clearAllMocks();
   addRunRecord.mockReturnValue("run-123");
@@ -107,6 +118,20 @@ describe("runOptimize session enrichment", () => {
     await runOptimize(baseReq, () => {}, "studio");
     sent = optimize.mock.calls[1][0].request;
     expect(sent.sessionContext).toBeUndefined();
+  });
+
+  it("merges settings.contextMemory with renderer context on every surface", async () => {
+    settingsContextMemory = "global standing notes";
+    await runOptimize({ ...baseReq, context: "extra instruction" }, () => {}, "overlay");
+    const sent = optimize.mock.calls[0][0].request;
+    expect(sent.context).toBe("global standing notes\n\nextra instruction");
+  });
+
+  it("uses settings.contextMemory alone when renderer context is empty", async () => {
+    settingsContextMemory = "sticky notes only";
+    await runOptimize(baseReq, () => {}, "studio");
+    const sent = optimize.mock.calls[0][0].request;
+    expect(sent.context).toBe("sticky notes only");
   });
 });
 

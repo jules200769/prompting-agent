@@ -7,6 +7,7 @@ let fileMemory: string[] = [];
 
 vi.mock("./storage", () => ({
   getSettings: () => settings,
+  getActiveProjectId: () => null,
   listFileMemory: () => fileMemory,
   recordFileMemory: () => {},
 }));

@@ -10,6 +10,9 @@ import {
   NEW_SESSION_TITLE,
   PROJECT_COLOR_PALETTE,
   SESSION_CONTEXT_MAX_CHARS,
+  CONTEXT_PASTE_MAX_CHARS,
+  clampContextPaste,
+  needsContextCompact,
   type ProjectContext,
   type SessionContext,
 } from "./session";
@@ -34,6 +37,26 @@ describe("clampContextText", () => {
     expect(clampContextText("x".repeat(SESSION_CONTEXT_MAX_CHARS + 500)).length).toBe(
       SESSION_CONTEXT_MAX_CHARS,
     );
+  });
+});
+
+describe("clampContextPaste", () => {
+  it("caps at CONTEXT_PASTE_MAX_CHARS without trimming", () => {
+    expect(clampContextPaste("  hello  ")).toBe("  hello  ");
+    expect(clampContextPaste("x".repeat(CONTEXT_PASTE_MAX_CHARS + 500)).length).toBe(
+      CONTEXT_PASTE_MAX_CHARS,
+    );
+  });
+});
+
+describe("needsContextCompact", () => {
+  it("is false at or below the stored context limit", () => {
+    expect(needsContextCompact("")).toBe(false);
+    expect(needsContextCompact("x".repeat(SESSION_CONTEXT_MAX_CHARS))).toBe(false);
+  });
+
+  it("is true above the stored context limit", () => {
+    expect(needsContextCompact("x".repeat(SESSION_CONTEXT_MAX_CHARS + 1))).toBe(true);
   });
 });
 
@@ -145,6 +168,11 @@ describe("buildSessionContextBlock", () => {
     const block = buildSessionContextBlock("md exclusion already implemented");
     expect(block).toContain("refine toward the remaining next steps");
   });
+
+  it("allows folding in established session/project facts for continuity", () => {
+    const block = buildSessionContextBlock("session facts");
+    expect(block).toContain("fold in established session/project facts");
+  });
 });
 
 describe("groupSessionsByProject", () => {
@@ -162,6 +190,7 @@ describe("groupSessionsByProject", () => {
     title: `Session ${id}`,
     contextText: "",
     projectId,
+    memoryUpdatedAt: null,
     createdAt: 0,
     updatedAt: 0,
   });
