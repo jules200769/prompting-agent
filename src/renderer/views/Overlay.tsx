@@ -687,6 +687,7 @@ export function Overlay() {
   }
 
   function toggleMenu(): void {
+    if (phase === "capturing") return;
     setMenuOpen((v) => {
       const next = !v;
       if (next) setContextPanelOpen(false);
@@ -1247,7 +1248,8 @@ export function Overlay() {
             <button
               type="button"
               onClick={toggleMenu}
-              className="inline-flex items-center gap-1 px-2 py-1 min-h-[28px] rounded-full text-white/80 hover:text-white hover:bg-white/20 transition whitespace-nowrap"
+              disabled={capturing}
+              className="inline-flex items-center gap-1 px-2 py-1 min-h-[28px] rounded-full text-white/80 hover:text-white hover:bg-white/20 transition whitespace-nowrap disabled:opacity-40 disabled:pointer-events-none"
               aria-label="Menu"
               aria-haspopup="menu"
               aria-expanded={menuOpen}

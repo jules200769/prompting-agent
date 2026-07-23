@@ -21,6 +21,8 @@ import {
   hotkeySnapshot,
   canUseEarlyCaptureFastPath,
   warmCaptureBridge,
+  stopPsBridge,
+  isPsBridgeWarm,
   getFrozenInjectHwnd,
   getFrozenInjectHostKind,
   waitUntilForeground,
@@ -403,8 +405,11 @@ async function triggerHotkey(): Promise<void> {
 
     const tSnap = isDev ? Date.now() : 0;
     await hotkeySnapshot();
-    if (isDev) console.log(`[Anvyll] hotkey snapshot: ${Date.now() - tSnap}ms`);
-
+    if (isDev) {
+      console.log(
+        `[Anvyll] hotkey snapshot: ${Date.now() - tSnap}ms (bridge ${isPsBridgeWarm() ? "warm" : "cold"})`,
+      );
+    }
     if (!canUseEarlyCaptureFastPath()) {
       await hideForCapture();
     }
@@ -739,4 +744,5 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   globalShortcut.unregisterAll();
+  void stopPsBridge();
 });

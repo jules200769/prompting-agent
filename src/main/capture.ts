@@ -3,7 +3,6 @@
 // Uses scripts/win-capture.ps1 (UI Automation + WM_GETTEXT + keybd_event fallback)
 // because inline SendInput struct marshalling is unreliable from Node.
 
-import { spawn } from "node:child_process";
 import { writeFile, unlink, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -35,7 +34,19 @@ import {
   type SnapshotContextSignals,
 } from "./contextLayer";
 import { getSettings } from "./storage";
+import {
+  bridgeRequest,
+  warmCaptureBridge,
+  isPsBridgeWarm,
+  startPsBridge,
+  stopPsBridge,
+  BRIDGE_SNAPSHOT_TIMEOUT_MS,
+  BRIDGE_CAPTURE_TIMEOUT_MS,
+  BRIDGE_INJECT_TIMEOUT_MS,
+  BRIDGE_SHARED_CAPTURE_DEADLINE_MS,
+} from "./psBridge";
 
+export { warmCaptureBridge, startPsBridge, stopPsBridge, isPsBridgeWarm };
 type SkipHwndProvider = () => number[];
 
 let getSkipHwnds: SkipHwndProvider = () => [];
@@ -83,8 +94,12 @@ let lastSnapshotContext: TerminalSnapshotContext = {};
 let pendingContextSignals: ContextSidecarSignals | null = null;
 /** App-identity signals from the last hotkey snapshot summary (context layer). */
 let pendingSnapshotSignals: SnapshotContextSignals = {};
-/** Focused element at hotkey time was a password field ? nothing may be captured. */
+/** Focused element at hotkey time was a password field — nothing may be captured. */
 let pendingIsPassword = false;
+/** Snapshot hit bridge timeout — do not start slow win-capture fallback. */
+let pendingSnapshotIncomplete = false;
+/** Shared hotkey capture budget start (snapshot + slow capture ≤ 950ms). */
+let captureBudgetStartedAt = 0;
 
 async function readForegroundHwnd(): Promise<number> {
   return getForegroundHwnd();
@@ -96,35 +111,10 @@ function hwndFromBuffer(buf: Buffer): number {
   return 0;
 }
 
-function scriptPath(name: string): string {
-  if (app.isPackaged) {
-    return join(process.resourcesPath, "scripts", name);
-  }
-  return join(app.getAppPath(), "scripts", name);
-}
-
-function psFile(args: string[]): Promise<{ stdout: string; code: number }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      "powershell.exe",
-      ["-STA", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", ...args],
-      {
-        windowsHide: true,
-      },
-    );
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
-    child.on("close", (code) => {
-      if (code === 0 || stdout.trim()) {
-        resolve({ stdout: stdout.trim(), code: code ?? 1 });
-      } else {
-        reject(new Error(`powershell exit ${code}: ${stderr.trim() || stdout.trim() || "no output"}`));
-      }
-    });
-    child.on("error", reject);
-  });
+function remainingCaptureBudgetMs(fallback: number): number {
+  if (captureBudgetStartedAt <= 0) return fallback;
+  const left = BRIDGE_SHARED_CAPTURE_DEADLINE_MS - (Date.now() - captureBudgetStartedAt);
+  return Math.max(50, Math.min(fallback, left));
 }
 
 /** Poll foreground and remember the last window (including Anvyll Studio). */
@@ -343,7 +333,7 @@ function finalizeCaptureText(raw: string): TerminalCaptureResolution {
   return resolveCaptureFromPossibleTerminal(stripUiPrivateUseGlyphs(raw), lastSnapshotContext);
 }
 
-/** Combined foreground + UIA snapshot in one PS spawn (call before hideForCapture on slow path). */
+/** Combined foreground + UIA snapshot via resident PS bridge (call before hideForCapture on slow path). */
 export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
   prepareCaptureTarget();
   const preparedHwnd = lastForegroundHwnd ?? 0;
@@ -358,22 +348,22 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
   pendingContextSignals = null;
   pendingSnapshotSignals = {};
   pendingIsPassword = false;
+  pendingSnapshotIncomplete = false;
+  captureBudgetStartedAt = Date.now();
   try {
-    const psArgs = [
-      "-File",
-      scriptPath("win-hotkey-snapshot.ps1"),
-      "-MetaPath",
-      metaPath,
-      "-TextPath",
-      textPath,
-    ];
-    if (contextPath) {
-      psArgs.push("-ContextPath", contextPath);
+    const { stdout } = await bridgeRequest(
+      "snapshot",
+      {
+        MetaPath: metaPath,
+        TextPath: textPath,
+        ...(contextPath ? { ContextPath: contextPath } : {}),
+        ...(preparedHwnd > 0 ? { TargetHwnd: preparedHwnd } : {}),
+      },
+      remainingCaptureBudgetMs(BRIDGE_SNAPSHOT_TIMEOUT_MS),
+    );
+    if (isPsBridgeWarm()) {
+      console.log("[Anvyll] hotkey snapshot: bridge warm");
     }
-    if (preparedHwnd > 0) {
-      psArgs.push("-TargetHwnd", String(preparedHwnd));
-    }
-    const { stdout } = await psFile(psArgs);
     let summary: HotkeySnapshotJson | null = null;
     try {
       summary = JSON.parse(stdout.trim()) as HotkeySnapshotJson;
@@ -497,6 +487,9 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
     );
     return meta;
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const timedOut = /timeout/i.test(msg);
+    pendingSnapshotIncomplete = timedOut;
     console.warn("[Anvyll] hotkey snapshot failed:", err);
     pendingUiaMeta = null;
     pendingCaptureText = null;
@@ -514,8 +507,10 @@ export async function hotkeySnapshot(): Promise<UiaTargetMeta | null> {
 
 /** Whether pre-hide snapshot is enough to skip hide + win-capture.ps1. */
 export function canUseEarlyCaptureFastPath(): boolean {
+  // Timed-out snapshot must not start hide + slow capture outside the shared budget.
+  if (pendingSnapshotIncomplete) return true;
   if (pendingIsTerminal) return true;
-  // UIA target known ? including empty field compose ? skip hideForCapture so the
+  // UIA target known — including empty field compose — skip hideForCapture so the
   // already-visible shell does not dim and pop back (looks like a second popup).
   if (pendingUiaMeta != null) return true;
   return shouldUseEarlyCaptureFastPath(pendingCaptureText, pendingUiaMeta != null);
@@ -524,13 +519,6 @@ export function canUseEarlyCaptureFastPath(): boolean {
 /** Whether the hotkey target is a terminal (selection-only; never run win-capture.ps1). */
 export function canUseTerminalCapturePath(): boolean {
   return pendingIsTerminal;
-}
-
-/** Preload PowerShell + UIA assemblies so the first hotkey capture is not cold-started. */
-export function warmCaptureBridge(): void {
-  void psFile(["-File", scriptPath("ps-warmup.ps1")]).catch((err) => {
-    console.warn("[Anvyll] capture warmup failed:", err);
-  });
 }
 
 function pickCaptureText(scriptText: string, earlyText: string | null): string {
@@ -563,14 +551,14 @@ function shouldSkipDraftForSelection(): boolean {
 }
 
 async function captureViaScript(hwnd: number, metaPath: string): Promise<string> {
-  const { stdout } = await psFile([
-    "-File",
-    scriptPath("win-capture.ps1"),
-    "-WindowHandle",
-    String(hwnd),
-    "-MetaPath",
-    metaPath,
-  ]);
+  const { stdout } = await bridgeRequest(
+    "capture",
+    {
+      WindowHandle: hwnd,
+      MetaPath: metaPath,
+    },
+    remainingCaptureBudgetMs(BRIDGE_CAPTURE_TIMEOUT_MS),
+  );
   return stdout;
 }
 
@@ -710,6 +698,19 @@ export async function captureSelection(): Promise<CaptureResult> {
     lastSnapshotContext.focusedIsTerminalPane,
   );
 
+  if (pendingSnapshotIncomplete) {
+    pendingSnapshotIncomplete = false;
+    console.warn("[Anvyll] capture: snapshot incomplete — skipping win-capture.ps1 fallback");
+    restoreClipboardSnapshot(snapshot);
+    return withCaptureContext({
+      text: "",
+      mode: "empty",
+      snapshot: { text: "", hasText: false },
+      uia: null,
+      terminalContext: inTerminalContext,
+    });
+  }
+
   const metaPath = join(tmpdir(), `anvyll-capture-meta-${Date.now()}.json`);
   let captured = "";
   if (!inTerminalContext) {
@@ -841,17 +842,15 @@ export async function injectText(text: string, snapshot: { text: string; hasText
   try {
     await writeFile(tmpPath, normalizedText, "utf8");
     await writeFile(metaPath, JSON.stringify(buildInjectMetaPayload(target)), "utf8");
-    const args = [
-      "-File",
-      scriptPath("win-inject.ps1"),
-      "-WindowHandle",
-      String(target.windowHwnd),
-      "-TextPath",
-      tmpPath,
-      "-MetaPath",
-      metaPath,
-    ];
-    const { stdout, code } = await psFile(args);
+    const { stdout, code } = await bridgeRequest(
+      "inject",
+      {
+        WindowHandle: target.windowHwnd,
+        TextPath: tmpPath,
+        MetaPath: metaPath,
+      },
+      BRIDGE_INJECT_TIMEOUT_MS,
+    );
     for (const line of stdout.split("\n")) {
       if (line.startsWith("PF_INJECT")) console.log("[Anvyll]", line);
     }

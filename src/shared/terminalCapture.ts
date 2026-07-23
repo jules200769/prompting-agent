@@ -40,14 +40,18 @@ function trimTerminalLine(line: string): string {
   return line.replace(/\s+$/g, "");
 }
 
-const SHELL_PROMPT_PATTERNS: RegExp[] = [
+// Specific prompt shapes (PowerShell, drive path, user@host) — a match here is almost
+// certainly a real shell prompt, so the current command is the text captured in group 1.
+const SPECIFIC_PROMPT_PATTERNS: RegExp[] = [
   /^PS\s+\(.+\)\s+.+>\s*(.*)$/i,
   /^PS\s+.+>\s*(.*)$/i,
   /^[A-Za-z]:\\[^>]*>\s*(.*)$/,
   /^[\w@.-]+:[~\w/\\.-]*[$#]\s*(.*)$/,
-  /^\$\s*(.*)$/,
-  /^>\s*(.*)$/,
 ];
+
+// Bare `$`/`>` prompts. These also match ordinary output lines (e.g. an npm script line
+// like "> build"), so they are only consulted when no specific prompt is present.
+const GENERIC_PROMPT_PATTERNS: RegExp[] = [/^\$\s*(.*)$/, /^>\s*(.*)$/];
 
 const TERMINAL_BUFFER_MARKERS = [
   /Copyright \(C\) Microsoft Corporation/i,
@@ -99,11 +103,27 @@ export function isLikelyFullConsoleBuffer(text: string): boolean {
   return lines.length >= 4 && text.length > 180;
 }
 
+/** The typed command on a prompt line, or null if the line has no prompt marker. */
+function matchPromptCommand(line: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = line.match(pattern);
+    if (match) return (match[1] ?? "").trim();
+  }
+  return null;
+}
+
 /**
- * Extract meaningful terminal context from capture text.
- * Keeps scrollback output and the current prompt line; strips startup banners and a11y noise.
+ * Extract only the command the user typed at the current prompt, discarding the scrollback
+ * (prior commands and their output) above it. Strips the PowerShell startup banner and a11y
+ * noise first.
+ *
+ * Returns:
+ *  - the typed command (prompt prefix removed) when a prompt line is found;
+ *  - null when the current prompt is empty (nothing typed) — caller opens empty compose;
+ *  - the text unchanged when no prompt marker is present (plain selection / pasted script),
+ *    since there is no scrollback to strip.
  */
-export function extractTerminalInput(text: string): string | null {
+export function extractCurrentCommandInput(text: string): string | null {
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const trimmed = normalized.trim();
   if (!trimmed) return null;
@@ -111,41 +131,22 @@ export function extractTerminalInput(text: string): string | null {
 
   const lines = normalized.split("\n").map(trimTerminalLine);
   const contentLines = stripTerminalBanner(lines);
-  const nonEmpty = contentLines.filter((l) => l.trim());
-
+  const nonEmpty = contentLines.filter((l) => l.trim()).map((l) => l.trim());
   if (nonEmpty.length === 0) return null;
 
-  const joined = contentLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  if (!joined) return null;
-
-  // Single non-prompt line (plain selection or typed command).
-  if (nonEmpty.length === 1) {
-    const only = nonEmpty[0].trim();
-    for (const pattern of SHELL_PROMPT_PATTERNS) {
-      const match = only.match(pattern);
-      if (match) {
-        const input = (match[1] ?? "").trim();
-        return input ? only : null;
+  // Prefer the last specific prompt (the active command line); fall back to a bare $/> prompt
+  // only when no specific prompt exists so an output line like "> build" is not mistaken for one.
+  for (const patterns of [SPECIFIC_PROMPT_PATTERNS, GENERIC_PROMPT_PATTERNS]) {
+    for (let i = nonEmpty.length - 1; i >= 0; i--) {
+      const command = matchPromptCommand(nonEmpty[i], patterns);
+      if (command !== null) {
+        return command || null;
       }
     }
-    return only;
   }
 
-  // Multi-line: keep full context (output + prompts). Trim trailing empty prompt-only line.
-  const lastNonEmpty = nonEmpty[nonEmpty.length - 1];
-  for (const pattern of SHELL_PROMPT_PATTERNS) {
-    const match = lastNonEmpty.match(pattern);
-    if (match && !(match[1] ?? "").trim() && nonEmpty.length > 1) {
-      const withoutEmptyPrompt = contentLines
-        .slice(0, contentLines.lastIndexOf(lastNonEmpty))
-        .join("\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-      return withoutEmptyPrompt || null;
-    }
-  }
-
-  return joined;
+  // No prompt marker at all — nothing to strip; return the content as-is.
+  return contentLines.join("\n").replace(/\n{3,}/g, "\n\n").trim() || null;
 }
 
 /**
@@ -186,7 +187,7 @@ export function resolveCaptureFromPossibleTerminal(
   }
 
   if (terminalContext) {
-    const extracted = extractTerminalInput(trimmed);
+    const extracted = extractCurrentCommandInput(trimmed);
     if (extracted) {
       return { text: extracted, mode: "terminal", terminalContext: true };
     }

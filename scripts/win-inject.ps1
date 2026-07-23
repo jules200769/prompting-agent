@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\bridge-compat.ps1"
 . "$PSScriptRoot\terminal-io.ps1"
 . "$PSScriptRoot\uia-write-meta.ps1"
 Add-Type -AssemblyName UIAutomationClient
@@ -171,7 +172,8 @@ if ($meta -and $meta.topClassName -match "Chrome_WidgetWin") {
 # text on the clipboard. A live window (incl. non-foreground / Chromium) is never rejected.
 if (-not [WinInject]::IsWindow($top)) {
   Write-Output "PF_INJECT_FAIL=deadTarget"
-  exit 1
+  Complete-AnvyllScript 1
+  return
 }
 
 function Normalize-InjectText([string]$value) {
@@ -224,13 +226,13 @@ function Complete-Inject([string]$method, [string]$verifyMode, [IntPtr]$top) {
   Clear-TextSelection $top
   Write-Output "PF_INJECT_VERIFY=$verifyMode"
   Write-Output "PF_INJECT_OK=$method"
-  exit 0
+  Stop-AnvyllScript 0
 }
 
 function Complete-TerminalInject([string]$method, [string]$verifyMode) {
   Write-Output "PF_INJECT_VERIFY=$verifyMode"
   Write-Output "PF_INJECT_OK=$method"
-  exit 0
+  Stop-AnvyllScript 0
 }
 
 function Get-VerifyPollCount([string]$expected) {
@@ -647,24 +649,25 @@ switch ($hostKind) {
   }
   "native" {
     if ($null -ne $targetEl) {
-      [void](Try-ValuePatternSet $targetEl $text $top)
+      Try-ValuePatternSet $targetEl $text $top
     }
-    [void](Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $false)
-    [void](Try-UnicodeReplace $targetEl $text $top)
+    Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $false
+    Try-UnicodeReplace $targetEl $text $top
   }
   "chromium" {
-    [void](Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste)
-    [void](Try-UnicodeReplace $targetEl $text $top)
+    Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste
+    Try-UnicodeReplace $targetEl $text $top
   }
   "richEditor" {
-    [void](Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste)
-    [void](Try-UnicodeReplace $targetEl $text $top)
+    Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste
+    Try-UnicodeReplace $targetEl $text $top
   }
   default {
-    [void](Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste)
-    [void](Try-UnicodeReplace $targetEl $text $top)
+    Try-ClipboardPaste $targetEl $text $top $pasteSettleMs $trustChromiumPaste
+    Try-UnicodeReplace $targetEl $text $top
   }
 }
 
 Write-Output "PF_INJECT_FAIL=all_methods"
-exit 1
+Complete-AnvyllScript 1
+return

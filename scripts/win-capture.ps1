@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. "$PSScriptRoot\bridge-compat.ps1"
 . "$PSScriptRoot\uia-write-meta.ps1"
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
@@ -162,13 +163,13 @@ function Emit-ClipboardCapture([string]$clip, [string]$method) {
     }
   }
   Write-Output $clip
-  exit 0
+  Stop-AnvyllScript 0
 }
 
 function Emit-Capture($result) {
   Write-Output $result.Text
   Write-CaptureMeta $result.Element $result.Method
-  exit 0
+  Stop-AnvyllScript 0
 }
 
 Add-Type -Language CSharp -TypeDefinition @'
@@ -276,7 +277,7 @@ function Invoke-WithMessageTextRetries([IntPtr]$focusHwnd, [int]$attempts = 3, [
   return $null
 }
 
-function Wait-ForFocusedElementText([int]$timeoutMs = 500, [int]$intervalMs = 50) {
+function Wait-ForFocusedElementText([int]$timeoutMs = 150, [int]$intervalMs = 50) {
   $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
   while ([DateTime]::UtcNow -lt $deadline) {
     $result = Get-FocusedElementText
@@ -286,7 +287,7 @@ function Wait-ForFocusedElementText([int]$timeoutMs = 500, [int]$intervalMs = 50
   return $null
 }
 
-function Wait-ClipboardText([int]$timeoutMs = 400, [int]$intervalMs = 50) {
+function Wait-ClipboardText([int]$timeoutMs = 150, [int]$intervalMs = 50) {
   $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
   while ([DateTime]::UtcNow -lt $deadline) {
     $clip = Get-Clipboard -Raw -ErrorAction SilentlyContinue
@@ -309,7 +310,7 @@ function Emit-MessageCapture([IntPtr]$focusHwnd, [string]$text) {
     Write-CaptureMeta $script:BestInjectElement.Element $script:BestInjectElement.Method
   }
   Write-Output $text
-  exit 0
+  Stop-AnvyllScript 0
 }
 
 $top = [IntPtr]::new($WindowHandle)
@@ -319,11 +320,13 @@ $focus = Wait-CaptureReady $top
 # the Ctrl+A/Ctrl+C keyboard-copy fallbacks below (those would exfiltrate the secret
 # to the clipboard).
 if (Test-FocusedIsPassword) {
-  exit 1
+  Complete-AnvyllScript 1
+  return
 }
 
 if (Test-ShouldSkipIntegratedTerminalCapture $script:ProcessName) {
-  exit 1
+  Complete-AnvyllScript 1
+  return
 }
 
 Try-RememberFocusedElement "initialFocus"
@@ -358,4 +361,5 @@ if (-not [string]::IsNullOrEmpty($clip)) {
   Emit-ClipboardCapture $clip "clipboardSelectAll"
 }
 
-exit 1
+Complete-AnvyllScript 1
+return

@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 # means the local WinFg Add-Type below MUST stay behind its `if (-not [PSTypeName]'WinFg'.Type)`
 # guard. Do not remove the guard and do not add a second unguarded `Add-Type ... class WinFg`,
 # or the snapshot dies with TYPE_ALREADY_EXISTS → slow win-capture.ps1 fallback (laggy popup).
+. "$PSScriptRoot\bridge-compat.ps1"
 . "$PSScriptRoot\terminal-io.ps1"
 . "$PSScriptRoot\uia-write-meta.ps1"
 Add-Type -AssemblyName UIAutomationClient
@@ -304,6 +305,9 @@ function Resolve-FocusedIsTerminalPane($el, [string]$processName) {
   return $false
 }
 
+# Cap UIA GetText — overlay/rewrite never needs megabyte document dumps (sidecar caps are smaller).
+$script:AnvyllMaxGetTextChars = 16000
+
 function Get-ElementText($el) {
   if ($null -eq $el) { return $null }
   $text = $null
@@ -314,7 +318,7 @@ function Get-ElementText($el) {
   if ([string]::IsNullOrEmpty($text)) {
     try {
       $tp = $el.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-      if ($tp) { $text = $tp.DocumentRange.GetText(1000000) }
+      if ($tp) { $text = $tp.DocumentRange.GetText($script:AnvyllMaxGetTextChars) }
     } catch {}
   }
   if ([string]::IsNullOrEmpty($text)) { return $null }
@@ -346,7 +350,7 @@ function Get-ElementSelectionText($el) {
     if ($null -eq $ranges -or $ranges.Length -eq 0) { return $null }
     $parts = New-Object System.Collections.Generic.List[string]
     foreach ($range in $ranges) {
-      $chunk = $range.GetText(-1)
+      $chunk = $range.GetText($script:AnvyllMaxGetTextChars)
       if (-not [string]::IsNullOrEmpty($chunk)) {
         [void]$parts.Add($chunk)
       }
@@ -364,7 +368,7 @@ function Get-ElementDocumentText($el) {
   try {
     $tp = $el.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
     if ($null -eq $tp) { return $null }
-    $text = $tp.DocumentRange.GetText(1000000)
+    $text = $tp.DocumentRange.GetText($script:AnvyllMaxGetTextChars)
     if ([string]::IsNullOrEmpty($text)) { return $null }
     if (Test-IsCaptureNoise $text) { return $null }
     return $text
@@ -396,7 +400,8 @@ function Find-TerminalPaneInWindow([long]$hwnd) {
   try {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($hwnd))
     if ($null -eq $root) { return $null }
-    return Find-TerminalPaneInSubtree $root 0 14
+    # Depth 8 — deep Cursor/VS Code trees (chat transcript) can stall for tens of seconds at 14.
+    return Find-TerminalPaneInSubtree $root 0 8
   } catch {}
   return $null
 }
@@ -437,8 +442,16 @@ $focusedIsTerminalPane = $false
 $isTerminal = $false
 
 if ($TargetHwnd -gt 0) {
-  [WinFg]::FocusWindow([IntPtr]::new($TargetHwnd))
-  Start-Sleep -Milliseconds 80
+  $targetPtr = [IntPtr]::new($TargetHwnd)
+  $fg = [WinFg]::GetForegroundWindow()
+  $alreadyFg = ($fg -ne [IntPtr]::Zero) -and ($fg -eq $targetPtr)
+  $iconic = $false
+  try { $iconic = [WinFg]::IsIconic($targetPtr) } catch {}
+  # Skip FocusWindow + 80ms when the capture target is already foreground (common hotkey path).
+  if (-not $alreadyFg -or $iconic) {
+    [WinFg]::FocusWindow($targetPtr)
+    Start-Sleep -Milliseconds 80
+  }
 }
 
 try {
@@ -464,7 +477,8 @@ if ($isPassword) {
     isPassword            = $true
   }
   Write-Output ($result | ConvertTo-Json -Compress)
-  exit 1
+  Complete-AnvyllScript 1
+  return
 }
 
 $windowTitle = Get-WindowTitle $hwnd
@@ -473,7 +487,13 @@ if ($isIntegratedHost -and -not $focusedIsTerminalPane) {
   $skipPaneTree = $false
   try {
     $checkEl = [System.Windows.Automation.AutomationElement]::FocusedElement
+    # Composer/chat text controls must never trigger a whole-window terminal tree walk.
     if (Test-IsTextControl $checkEl) { $skipPaneTree = $true }
+    if (-not $skipPaneTree -and (Test-ElementHasTerminalAncestor $checkEl)) {
+      $focusedIsTerminalPane = $true
+      $skipPaneTree = $true
+      $lastEl = $checkEl
+    }
   } catch {}
   if (-not $skipPaneTree) {
     $paneEl = Find-TerminalPaneInWindow $hwnd
@@ -499,11 +519,14 @@ if ($isTerminal) {
         $termBounds = Get-TerminalPaneBoundsFromElement $el
       }
       if ($null -eq $termBounds) {
-        $paneEl = Find-TerminalPaneInWindow $hwnd
-        if ($null -ne $paneEl) {
-          $lastEl = $paneEl
-          $el = $paneEl
-          $termBounds = Get-TerminalPaneBoundsFromElement $paneEl
+        # Only deep-walk when ancestry already suggests a terminal pane (avoid Cursor chat stalls).
+        if ($focusedIsTerminalPane) {
+          $paneEl = Find-TerminalPaneInWindow $hwnd
+          if ($null -ne $paneEl) {
+            $lastEl = $paneEl
+            $el = $paneEl
+            $termBounds = Get-TerminalPaneBoundsFromElement $paneEl
+          }
         }
       }
       # UIA-only — never SendCtrlCombo/Ctrl+C here. Clipboard copy fallbacks inject ^C into
@@ -584,21 +607,38 @@ if ($isTerminal) {
   $hostKind = Get-HostKind $className "" ""
 }
 
-# Best-effort page URL for Chromium browsers (Document element exposes it via ValuePattern).
-# Single bounded attempt; window-title parsing is the fallback for site routing.
+# Best-effort page URL for Chromium browsers. Prefer a cheap ancestor walk from the
+# focused element; whole-window Descendants is a last resort (can be expensive).
 $siteUrl = $null
 if ($ContextPath -and -not $isTerminal -and $className -match 'Chrome_WidgetWin') {
   try {
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($hwnd))
-    if ($null -ne $root) {
-      $docCond = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-        [System.Windows.Automation.ControlType]::Document)
-      $doc = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $docCond)
-      if ($null -ne $doc) {
-        $vp = $doc.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-        if ($vp -and $vp.Current.Value) { $siteUrl = $vp.Current.Value }
+    $docEl = $null
+    $cur = $null
+    try { $cur = [System.Windows.Automation.AutomationElement]::FocusedElement } catch {}
+    for ($i = 0; $i -lt 8 -and $null -ne $cur; $i++) {
+      try {
+        if ($cur.Current.ControlType.ProgrammaticName -eq "ControlType.Document") {
+          $docEl = $cur
+          break
+        }
+      } catch {}
+      try { $cur = $cur.GetParent() } catch { break }
+    }
+    if ($null -eq $docEl) {
+      $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]::new($hwnd))
+      if ($null -ne $root) {
+        $docCond = New-Object System.Windows.Automation.PropertyCondition(
+          [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+          [System.Windows.Automation.ControlType]::Document)
+        $docEl = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $docCond)
+        if ($null -eq $docEl) {
+          $docEl = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $docCond)
+        }
       }
+    }
+    if ($null -ne $docEl) {
+      $vp = $docEl.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+      if ($vp -and $vp.Current.Value) { $siteUrl = $vp.Current.Value }
     }
   } catch {}
 }
@@ -623,5 +663,9 @@ if (-not [string]::IsNullOrEmpty($siteUrl)) {
   $result.siteUrl = $siteUrl
 }
 Write-Output ($result | ConvertTo-Json -Compress)
-if ($uiaStatus -eq "ok" -and $charCount -gt 0) { exit 0 }
-exit 1
+if ($uiaStatus -eq "ok" -and $charCount -gt 0) {
+  Complete-AnvyllScript 0
+  return
+}
+Complete-AnvyllScript 1
+return

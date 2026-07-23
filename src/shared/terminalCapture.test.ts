@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  extractTerminalInput,
+  extractCurrentCommandInput,
   isLikelyFullConsoleBuffer,
   isTerminalBufferDump,
   resolveCaptureFromPossibleTerminal,
@@ -30,49 +30,55 @@ Install the latest PowerShell for new features and improvements! https://aka.ms/
   });
 });
 
-describe("extractTerminalInput", () => {
-  it("extracts prompt line from a full PowerShell buffer read", () => {
-    const sample = `Windows PowerShell                                                                                                      
-Copyright (C) Microsoft Corporation. All rights reserved.                                                               
-                                                                                                                        
-Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows                               
-                                                                                                                        
+describe("extractCurrentCommandInput", () => {
+  it("extracts only the typed command from a full PowerShell buffer read", () => {
+    const sample = `Windows PowerShell
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows
+
 PS C:\\Users\\julez> kijk maar, hier is het bewijs...`;
-    expect(extractTerminalInput(sample)).toBe("PS C:\\Users\\julez> kijk maar, hier is het bewijs...");
+    expect(extractCurrentCommandInput(sample)).toBe("kijk maar, hier is het bewijs...");
   });
 
-  it("keeps scrollback output and the current prompt line", () => {
+  it("drops scrollback and returns only the current command line", () => {
     const sample = `PS C:\\project> npm run build
 
 > build
 Error: module not found
 
 PS C:\\project> fix the import path`;
-    expect(extractTerminalInput(sample)).toBe(sample);
+    expect(extractCurrentCommandInput(sample)).toBe("fix the import path");
+  });
+
+  it("does not mistake an npm output line for the prompt", () => {
+    const sample = `PS C:\\project> npm run build
+> build
+compiling...`;
+    expect(extractCurrentCommandInput(sample)).toBe("npm run build");
   });
 
   it("returns a plain single-line selection unchanged", () => {
-    expect(extractTerminalInput("npm run build")).toBe("npm run build");
+    expect(extractCurrentCommandInput("npm run build")).toBe("npm run build");
   });
 
-  it("returns a multi-line script selection unchanged", () => {
+  it("returns a multi-line script (no prompt marker) unchanged", () => {
     const script = "function foo() {\n  return 1;\n}";
-    expect(extractTerminalInput(script)).toBe(script);
+    expect(extractCurrentCommandInput(script)).toBe(script);
   });
 
-  it("returns null for buffer dump with empty prompt line", () => {
+  it("returns null when the current prompt is empty (nothing typed)", () => {
     const sample = `Windows PowerShell
 Copyright (C) Microsoft Corporation. All rights reserved.
 PS C:\\Users\\julez> `;
-    expect(extractTerminalInput(sample)).toBeNull();
+    expect(extractCurrentCommandInput(sample)).toBeNull();
   });
 
-  it("returns scrollback when prompt line is empty but output exists", () => {
+  it("returns null when the prompt is empty even with prior output", () => {
     const sample = `PS C:\\Users\\julez> npm test
 FAIL tests/foo.test.ts
 PS C:\\Users\\julez> `;
-    expect(extractTerminalInput(sample)).toBe(`PS C:\\Users\\julez> npm test
-FAIL tests/foo.test.ts`);
+    expect(extractCurrentCommandInput(sample)).toBeNull();
   });
 });
 
@@ -96,14 +102,27 @@ PS C:\\Users\\julez> mijn prompt hier`;
       process: "powershell",
     });
     expect(res.mode).toBe("terminal");
-    expect(res.text).toBe("PS C:\\Users\\julez> mijn prompt hier");
+    expect(res.text).toBe("mijn prompt hier");
     expect(res.terminalContext).toBe(true);
   });
 
   it("detects buffer dump without explicit terminal context", () => {
     const res = resolveCaptureFromPossibleTerminal(buffer);
     expect(res.mode).toBe("terminal");
-    expect(res.text).toBe("PS C:\\Users\\julez> mijn prompt hier");
+    expect(res.text).toBe("mijn prompt hier");
+  });
+
+  it("returns empty mode when the terminal prompt is empty", () => {
+    const emptyPrompt = `Windows PowerShell
+Copyright (C) Microsoft Corporation. All rights reserved.
+PS C:\\Users\\julez> npm test
+FAIL tests/foo.test.ts
+PS C:\\Users\\julez> `;
+    const res = resolveCaptureFromPossibleTerminal(emptyPrompt, {
+      className: "ConsoleWindowClass",
+      process: "powershell",
+    });
+    expect(res).toEqual({ text: "", mode: "empty", terminalContext: true });
   });
 
   it("keeps normal field text unchanged", () => {
