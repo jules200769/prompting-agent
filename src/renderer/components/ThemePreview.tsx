@@ -13,12 +13,16 @@ export function ThemePreview({ theme }: ThemePreviewProps) {
 
   return (
     <figure className="theme-preview" aria-label={`${label} overlay preview`}>
-      <img
-        src={src}
-        alt={`${label} overlay modal preview`}
-        className="theme-preview__img"
-        draggable={false}
-      />
+      <div className="theme-gallery__preview" data-theme-preview={theme}>
+        <div className="theme-gallery__preview-stage">
+          <img
+            src={src}
+            alt={`${label} overlay modal preview`}
+            className="theme-gallery__preview-img"
+            draggable={false}
+          />
+        </div>
+      </div>
       <figcaption className="theme-preview__caption">{label}</figcaption>
     </figure>
   );

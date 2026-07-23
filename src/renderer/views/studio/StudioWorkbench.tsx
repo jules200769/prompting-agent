@@ -19,7 +19,6 @@ import {
   type PromptCategory,
   type PromptVersion,
 } from "../../../shared/studio";
-import type { ProjectContext, SessionContext } from "../../../shared/session";
 import { api } from "../../api";
 import type { StudioService } from "../../services/studioService";
 import { useToast } from "../../components/Toast";
@@ -33,6 +32,7 @@ import {
   StudioPage,
   StudioSegmented,
 } from "./StudioPrimitives";
+import { workbenchHeading } from "./workbenchHeading";
 
 type ResultTab = "inputs" | "context" | "versions" | "settings";
 
@@ -249,8 +249,6 @@ export function StudioWorkbench({
   seed,
   service,
   instructions,
-  activeProject,
-  activeSession,
   onRunComplete,
 }: {
   mode: "generator" | "optimizer";
@@ -258,8 +256,6 @@ export function StudioWorkbench({
   seed: WorkbenchSeed | null;
   service: StudioService;
   instructions: Instruction[];
-  activeProject?: ProjectContext | null;
-  activeSession?: SessionContext | null;
   onRunComplete?: (prompt: string) => void;
 }) {
   const [prompt, setPrompt] = useState("");
@@ -398,25 +394,12 @@ export function StudioWorkbench({
   const resultText = result?.optimizedPrompt || streamed;
   const modelLabel = MODELS.find((candidate) => candidate.id === model)?.label ?? model;
 
-  const sessionPath = activeSession
-    ? `${activeProject?.title ?? "No project"} / ${activeSession.title}`
-    : null;
-  const heading = sessionPath
-    ? { eyebrow: activeProject ? "Session" : "No project", title: sessionPath }
-    : {
-        eyebrow: mode === "generator" ? "Create" : "Improve",
-        title: mode === "generator" ? "Craft a model-ready prompt" : "Optimize your existing prompt",
-      };
-  const description = sessionPath
-    ? "Refinements in this session are grounded in its saved context."
-    : mode === "generator"
-      ? "Start with an idea, choose its purpose, and build a prompt for the model you use."
-      : "Paste a prompt you already use. Anvyll can ask three focused questions before rebuilding it.";
+  const { eyebrow, title, description } = workbenchHeading(mode);
 
   return (
     <StudioPage
-      eyebrow={heading.eyebrow}
-      title={heading.title}
+      eyebrow={eyebrow}
+      title={title}
       description={description}
       compact={Boolean(resultText)}
     >

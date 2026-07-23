@@ -35,6 +35,7 @@ import {
 } from "./studio/StudioProductViews";
 import { StudioHistory, StudioSettings } from "./studio/StudioSystemViews";
 import { StudioWorkbench } from "./studio/StudioWorkbench";
+import { sessionTitlebarLabel } from "./studio/workbenchHeading";
 
 const NAV_GROUPS: Array<{
   label: string;
@@ -85,6 +86,7 @@ function StudioShell() {
   const [projects, setProjects] = useState<ProjectContext[]>([]);
   const [sessions, setSessions] = useState<SessionContext[]>([]);
   const [activeSession, setActiveSession] = useState<SessionContext | null>(null);
+  const [sessionBound, setSessionBound] = useState(false);
   const { variants, reduce } = useReducedMotionSafe();
 
   const activeProject = useMemo(
@@ -132,6 +134,7 @@ function StudioShell() {
     });
     const offSeed = api.onStudioWorkbench((nextSeed) => {
       setSeed(nextSeed);
+      setSessionBound(false);
       setRoute("optimizer");
     });
     // The overlay writes to the same project/session store; re-pull when the
@@ -163,17 +166,22 @@ function StudioShell() {
 
   function openSeed(nextRoute: "generator" | "tester" | "optimizer", nextSeed: WorkbenchSeed) {
     setSeed(nextSeed);
+    setSessionBound(false);
     setRoute(nextRoute);
   }
 
-  // Open a session in the Optimizer: activate it (so its context grounds
-  // rewrites everywhere, including the overlay) and route to a blank optimizer
-  // whose header shows the project/session path.
+  function navigateRoute(nextRoute: StudioRoute) {
+    setSessionBound(false);
+    setRoute(nextRoute);
+    if (nextRoute === "plans") void refreshProductState();
+  }
+
   async function openSession(session: SessionContext) {
     const activated = await api.sessionSetActive(session.id);
     await api.projectSetActive(session.projectId ?? null);
     setActiveSession(activated ?? session);
     setSeed(null);
+    setSessionBound(true);
     setRoute("optimizer");
     void refreshContextTree();
   }
@@ -186,6 +194,7 @@ function StudioShell() {
     const session = await api.sessionCreate(project.id);
     await api.sessionSetActive(session.id);
     setActiveSession(session);
+    setSessionBound(true);
     setRoute("optimizer");
     void refreshContextTree();
   }
@@ -195,13 +204,17 @@ function StudioShell() {
     await api.sessionSetActive(session.id);
     await api.projectSetActive(projectId);
     setActiveSession(session);
+    setSessionBound(true);
     setRoute("optimizer");
     void refreshContextTree();
   }
 
   async function handleDeleteSession(id: string) {
     await api.sessionDelete(id);
-    if (activeSession?.id === id) setActiveSession(await api.sessionGetActive());
+    if (activeSession?.id === id) {
+      setActiveSession(await api.sessionGetActive());
+      setSessionBound(false);
+    }
     void refreshContextTree();
   }
 
@@ -229,10 +242,7 @@ function StudioShell() {
           label: item.label,
           group: group.label,
           index: item.index,
-          onSelect: () => {
-            setRoute(item.route);
-            if (item.route === "plans") void refreshProductState();
-          },
+          onSelect: () => navigateRoute(item.route),
         })),
       ),
     [],
@@ -248,8 +258,6 @@ function StudioShell() {
             seed={seed}
             service={studioService}
             instructions={instructions}
-            activeProject={activeProject}
-            activeSession={activeSession}
             onRunComplete={handleRunComplete}
           />
         );
@@ -261,8 +269,6 @@ function StudioShell() {
             seed={seed}
             service={studioService}
             instructions={instructions}
-            activeProject={activeProject}
-            activeSession={activeSession}
             onRunComplete={handleRunComplete}
           />
         );
@@ -285,6 +291,11 @@ function StudioShell() {
     }
   }
 
+  const navLabel =
+    NAV_GROUPS.flatMap((group) => group.items).find((item) => item.route === route)?.label ?? "";
+  const titlebarLabel =
+    sessionTitlebarLabel(sessionBound, activeProject, activeSession) ?? navLabel;
+
   return (
     <div className="studio-app">
       <div className="studio-backdrop" aria-hidden="true" />
@@ -298,7 +309,7 @@ function StudioShell() {
         </div>
 
         {usage && currentPlan && (
-          <button type="button" className="studio-sidebar__usage" onClick={() => setRoute("plans")}>
+          <button type="button" className="studio-sidebar__usage" onClick={() => navigateRoute("plans")}>
             <span>
               <strong>{currentPlan.name}</strong>
               <small>{usage.limit === null ? "Unlimited" : `${usagePercent(usage)}% used`}</small>
@@ -330,10 +341,7 @@ function StudioShell() {
                     key={item.route}
                     className={route === item.route ? "is-active" : ""}
                     aria-current={route === item.route ? "page" : undefined}
-                    onClick={() => {
-                      setRoute(item.route);
-                      if (item.route === "plans") void refreshProductState();
-                    }}
+                    onClick={() => navigateRoute(item.route)}
                   >
                     {route === item.route && (
                       <motion.span
@@ -359,23 +367,16 @@ function StudioShell() {
             <strong>{account?.displayName ?? "Local workspace"}</strong>
             <small>{account?.status === "signed-in" ? account.email : "Not signed in"}</small>
           </span>
-          <button type="button" onClick={() => setRoute("settings")} aria-label="Account settings">···</button>
+          <button type="button" onClick={() => navigateRoute("settings")} aria-label="Account settings">···</button>
         </div>
       </aside>
 
       <main className="studio-main">
         <div className="studio-titlebar">
-          <span>{NAV_GROUPS.flatMap((group) => group.items).find((item) => item.route === route)?.label}</span>
+          <span className="studio-titlebar__label" title={titlebarLabel}>
+            {titlebarLabel}
+          </span>
           <div className="studio-titlebar__right">
-            <button
-              type="button"
-              className="studio-cmdk-trigger"
-              onClick={() => setPaletteOpen(true)}
-              aria-label="Open command palette"
-            >
-              <span>Jump to…</span>
-              <kbd>⌘K</kbd>
-            </button>
             <span className="studio-titlebar__model">
               {settings ? `${MODELS.find((model) => model.id === settings.defaultModel)?.label} default` : "Loading workspace"}
             </span>

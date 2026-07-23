@@ -78,7 +78,7 @@ export function StudioPage({
       <header className="studio-page__header">
         <div className="studio-page__heading">
           {eyebrow && <div className="studio-eyebrow">{eyebrow}</div>}
-          <h1>{title}</h1>
+          <h1 title={title}>{title}</h1>
           {description && <p>{description}</p>}
         </div>
         {actions && <div className="studio-page__actions">{actions}</div>}

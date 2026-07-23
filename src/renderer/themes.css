@@ -220,6 +220,12 @@
   --scroll-thumb: rgba(241, 234, 225, 0.2);
   --scroll-thumb-hover: rgba(241, 234, 225, 0.35);
   --focus-ring: rgba(241, 234, 225, 0.4);
+  /* Muted steel for gradient CTAs — accent stays bright for ink/highlights. */
+  --cta-dim: #3a3632;
+  --cta-mid: #565048;
+  --cta-soft: #726a62;
+  --cta-ink: #ddd4c8;
+  --cta-glow-rgb: 86, 80, 72;
   --font-display: "Bahnschrift", "DIN Alternate", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
   --font-sans: "IBM Plex Sans", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
 }
@@ -329,4 +335,22 @@ html[data-theme="ash-paper"] {
 [data-theme="tempered-green"] {
   --overlay-panel-bg: rgba(8, 14, 10, 0.58);
   --overlay-menu-bg: rgba(20, 32, 24, 0.93);
+}
+
+/* Midnight Anvil — keep steel CTAs subdued (no bright cream flare). */
+html[data-theme="midnight-anvil"] .studio-button--primary,
+html[data-theme="midnight-anvil"] .apple-glass-pill--accent,
+html[data-theme="midnight-anvil"] .btn-accent {
+  box-shadow:
+    0 6px 18px rgba(var(--cta-glow-rgb), 0.2),
+    inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
+}
+
+html[data-theme="midnight-anvil"] .studio-button--primary:hover:not(:disabled),
+html[data-theme="midnight-anvil"] .apple-glass-pill--accent:hover:not(:disabled),
+html[data-theme="midnight-anvil"] .btn-accent:hover:not(:disabled) {
+  filter: brightness(1.04);
+  box-shadow:
+    0 8px 22px rgba(var(--cta-glow-rgb), 0.26),
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent);
 }
